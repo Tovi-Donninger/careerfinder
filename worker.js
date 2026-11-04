@@ -130,12 +130,12 @@ function normaliseUrl(value) {
     for (const key of [...url.searchParams.keys()]) {
       if (/^(utm_|gclid$|fbclid$|ref$)/i.test(key)) url.searchParams.delete(key);
     }
-    return url.href.replace(/\\/$/, "").toLowerCase();
+    return url.href.replace(/\/$/, "").toLowerCase();
   } catch { return String(value || "").toLowerCase(); }
 }
 
 function pageClearlyClosed(content) {
-  return /no longer accepting applications|applications are closed|application period has ended|this (?:job|position|vacancy) (?:is )?closed|position has been filled|job has been filled|vacancy has been filled|no longer available|job posting has expired|this job is expired|applications for this role have closed/i.test(content);
+  return /no longer accepting applications|not accepting applications|applications are closed|application period has ended|this (?:job|position|vacancy) (?:is )?closed|position has been filled|job has been filled|vacancy has been filled|no longer available|job posting has expired|this job is expired|applications for this role have closed|this opportunity is no longer available|the job is no longer available|recruitment process has ended|position is no longer open|vacancy is closed/i.test(content);
 }
 
 function pageHasApplySignal(content) {
