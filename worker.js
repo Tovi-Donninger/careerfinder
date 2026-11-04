@@ -92,7 +92,7 @@ function fallbackTopJobs(candidates, preferences) {
     if (/linkedin\.com\/jobs\/view|indeed\.com\/viewjob|lever\.co|greenhouse\.io|ashbyhq\.com|workable\.com/i.test(url)) score += 8;
     return { job, score: Math.min(95, score), hits };
   }).filter(Boolean).sort((a,b) => b.score-a.score);
-  return scored.slice(0,8).map(({job,score,hits}) => ({
+  return scored.filter(x => x.hits > 0).slice(0,10).map(({job,score,hits}) => ({
     ...job,
     matchReason: hits ? "Ranked using matching job-title and vacancy details." : "Potentially relevant vacancy; check the employer listing for full requirements.",
     matchScore: score
@@ -101,13 +101,13 @@ function fallbackTopJobs(candidates, preferences) {
 
 async function selectTopJobs(env, candidates, preferences) {
   if (!candidates.length) return [];
-  const shortlist = candidates.slice(0, 24).map((job, index) => ({index,title:job.title,source:job.source,description:(job.description||"").slice(0,260)}));
-  const system = "You rank job search results for a candidate. Use only supplied information. Exclude search pages, homepages, articles and advice pages. Prefer specific vacancy pages. Return exactly one valid JSON object and nothing else: {\"selected\":[{\"index\":0,\"matchReason\":\"Short reason\",\"matchScore\":80}]}. Select no more than 8 relevant individual vacancies. Use only indexes from input. If none are relevant return {\"selected\":[]}. Keep each reason under 18 words.";
+  const shortlist = candidates.slice(0, 30).map((job, index) => ({index,title:job.title,source:job.source,description:(job.description||"").slice(0,260)}));
+  const system = "You rank job search results for a candidate. Use only supplied information. Exclude search pages, homepages, articles and advice pages. Prefer specific vacancy pages. Return exactly one valid JSON object and nothing else: {\"selected\":[{\"index\":0,\"matchReason\":\"Short reason\",\"matchScore\":80}]}. Select no more than 10 relevant individual vacancies. Use only indexes from input. If none are relevant return {\"selected\":[]}. Keep each reason under 18 words.";
   let parsed=null,lastError=null;
   for (const attempt of [0,1]) {
     try {
-      const items=attempt===0?shortlist:shortlist.slice(0,14).map(({index,title,source})=>({index,title,source}));
-      const prompt="Candidate criteria: "+JSON.stringify(preferences)+"\nVacancy results: "+JSON.stringify(items)+"\nReturn ONLY valid JSON with selected array. Each item must have index, matchReason and matchScore. Maximum 8.";
+      const items=attempt===0?shortlist:shortlist.slice(0,20).map(({index,title,source})=>({index,title,source}));
+      const prompt="Candidate criteria: "+JSON.stringify(preferences)+"\nVacancy results: "+JSON.stringify(items)+"\nReturn ONLY valid JSON with selected array. Each item must have index, matchReason and matchScore. Maximum 10.";
       const raw=await askAI(env,system,prompt,attempt===0?1200:900);
       parsed=extractJSON(raw);
       if(Array.isArray(parsed.selected)) break;
@@ -119,7 +119,7 @@ async function selectTopJobs(env, candidates, preferences) {
     return fallbackTopJobs(candidates, preferences);
   }
   const used=new Set();
-  return parsed.selected.slice(0,8).map(item=>{
+  return parsed.selected.slice(0,10).map(item=>{
     const index=Number(item.index);
     if(!Number.isInteger(index)||index<0||index>=shortlist.length||used.has(index)) return null;
     used.add(index);
