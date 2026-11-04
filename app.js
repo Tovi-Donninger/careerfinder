@@ -22,17 +22,13 @@ function showSearchLoading(){
  const box=el("jobs");
  box.className="search-loading";
  box.setAttribute("aria-live","polite");
- box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · LIVE SEARCH</span><h4>Finding your next opportunity</h4><p id="loading-stage">Understanding your search criteria…</p><div class="loading-track" role="progressbar" aria-label="Search progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"><span id="loading-progress"></span></div><div class="loading-steps"><span class="active" data-step="0"><i>01</i> Understand</span><span data-step="1"><i>02</i> Discover</span><span data-step="2"><i>03</i> Review</span><span data-step="3"><i>04</i> Shortlist</span></div><small class="loading-footnote">CareerFinder is still working while employer pages are checked. Progress is an estimate, not a live count of completed jobs.</small><small id="loading-clock" class="loading-footnote">Elapsed: 0:00</small></div>';
+ box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · LIVE SEARCH</span><h4>Finding your next opportunity</h4><p id="loading-stage">Understanding your search criteria…</p><div class="loading-track" role="progressbar" aria-label="Search progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"><span id="loading-progress"></span></div><div class="loading-steps"><span class="active" data-step="0"><i>01</i> Understand</span><span data-step="1"><i>02</i> Discover</span><span data-step="2"><i>03</i> Review</span><span data-step="3"><i>04</i> Shortlist</span></div><small class="loading-footnote">CareerFinder is searching, reading job details and preparing your shortlist. Progress is an estimate.</small><small id="loading-clock" class="loading-footnote">Elapsed: 0:00</small></div>';
  const stages=[
   {label:"Understanding your search criteria…",progress:12},
-  {label:"Expanding job titles and related opportunities…",progress:25},
-  {label:"Searching relevant job boards and employer sites…",progress:40},
-  {label:"Collecting individual vacancy advertisements…",progress:58},
-  {label:"Comparing roles against your requirements…",progress:72},
-  {label:"Reading employer vacancy descriptions…",progress:84},
-  {label:"Checking that each page describes one specific job…",progress:90},
-  {label:"Removing duplicates and checking for closure notices…",progress:94},
-  {label:"Preparing your final shortlist…",progress:96}
+  {label:"Searching job boards and employer websites…",progress:32},
+  {label:"Reading individual vacancy details…",progress:58},
+  {label:"Comparing jobs with your requirements…",progress:80},
+  {label:"Ranking the strongest matches…",progress:94}
  ];
  let stage=0,elapsed=0;
  const update=()=>{
@@ -60,7 +56,7 @@ function stopSearchLoading(){
 function showFallbackSearches(q,loc,message){
  const box=el("jobs");
  box.className="empty";
- box.innerHTML='<h4>No matching vacancies found</h4><p>'+esc(message)+'</p><p><strong>Your search:</strong> '+esc(q||"Any job")+' · '+esc(loc||"Any location")+'</p><p>Try a broader title or location. You can also expand “More places to search” for optional external websites.</p>';
+ box.innerHTML='<h4>No matching vacancies found</h4><p>'+esc(message)+'</p><p><strong>Your search:</strong> '+esc(q||"Any job")+' · '+esc(loc||"Israel")+'</p><p>Try a broader job title or location.</p>';
 }
 function experienceMatches(job,level){if(level==="any")return true;const title=(job.title||"").toLowerCase(),desc=(job.description||"").toLowerCase(),text=title+" "+desc+" "+(job.category||"")+" "+(job.tags||[]).join(" ");const patterns={ "no-experience":/no experience|no prior experience|without experience|experience not required|training provided|entry[- ]level|graduate|intern/i, internship:/intern(ship)?|trainee/i, entry:/entry[- ]level|graduate|recent graduate|new grad|no experience|junior/i, junior:/junior|0\s*[-–to]+\s*2 years|1\s*[-–to]+\s*2 years/i, associate:/associate|2\s*[-–to]+\s*4 years/i, mid:/mid[- ]level|3\s*[-–to]+\s*7 years|4\s*[-–to]+\s*6 years/i, senior:/senior|7\+? years|8\+? years|lead engineer|principal/i, manager:/manager|management|team lead|head of/i, executive:/director|executive|vice president|\\bvp\\b|chief [a-z]+ officer/i};if(patterns[level].test(text))return true;if(level==="junior"&&/entry[- ]level/.test(title))return true;if(level==="entry"&&/junior/.test(title))return true;return false}
 async function cachedFeed(key,url,ttl){const cacheKey="careerfinder-feed-"+key;try{const cached=JSON.parse(localStorage.getItem(cacheKey)||"null");if(cached&&Date.now()-cached.savedAt<ttl)return cached.value}catch{}const r=await fetch(url);if(!r.ok)throw Error("HTTP "+r.status);const value=await r.json();try{localStorage.setItem(cacheKey,JSON.stringify({savedAt:Date.now(),value}))}catch{}return value}
@@ -90,15 +86,11 @@ async function search(e){
   el("result-count").textContent=rows.length+" AI-selected matches from "+(payload.candidatesReviewed||0)+" reviewed listings";
   if(payload.profileSummary)el("jobs").insertAdjacentHTML("beforebegin",'<p class="ai-summary">'+esc(payload.profileSummary)+'</p>');
   if(!rows.length){
-   const d=payload.searchDiagnostics||{};
-   const diagnosticText=d.searchResultsReturned!==undefined
-    ? "Search results: "+d.searchResultsReturned+" · Unique pages: "+d.uniqueResults+" · After page filters: "+d.afterSearchPageAndProfileFilter+" · Direct vacancy links: "+d.afterDirectVacancyUrlFilter+" · Employer pages checked: "+d.candidatePagesSelectedForChecking+" · Verified vacancies: "+d.verifiedIndividualVacancies+"."
-    : "The search provider did not return diagnostic counts.";
-   showFallbackSearches(q,loc,"CareerFinder found results but could not pass them through its vacancy checks. "+diagnosticText+" This helps identify whether the problem is search discovery, URL filtering or employer-page verification.");
+   showFallbackSearches(q,loc,payload.profileSummary||"The search completed, but no individual vacancies matched your requirements. Try a broader job title.");
    return
   }
   el("jobs").className="";
-  el("jobs").innerHTML=rows.map((x,i)=>'<article class="job curated-job"><div class="job-main"><h4>'+esc(x.title)+'</h4><small>'+esc(x.company||x.source||"Job listing")+' · '+esc(x.location||"Location not stated")+'</small>'+(x.availabilityStatus?'<div class="job-meta"><span>'+esc(x.availabilityStatus)+'</span></div>':'')+(x.description?'<p class="job-description">'+esc(String(x.description).slice(0,280))+'</p>':'')+'<p class="match-reason">'+esc(x.matchReason||"Selected by AI as a relevant match.")+'</p></div><div class="job-actions"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">View vacancy ↗</a></div></article>').join("");
+  el("jobs").innerHTML=rows.map((x,i)=>'<article class="job curated-job"><div class="job-main"><h4>'+esc(x.title)+'</h4><small>'+esc(x.company||x.source||"Job listing")+' · '+esc(x.location||"Location not stated")+'</small><div class="job-meta"><span>'+esc(x.availabilityStatus||"Not confirmed")+'</span>'+(x.languageStatus?'<span>'+esc(x.languageStatus)+'</span>':'')+'</div>'+(x.description?'<p class="job-description">'+esc(String(x.description).slice(0,280))+'</p>':'')+'<p class="match-reason">'+esc(x.matchReason||"Selected by AI as a relevant match.")+'</p></div><div class="job-actions"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">View vacancy ↗</a></div></article>').join("");
  }catch(error){
   stopSearchLoading();
   showFallbackSearches(q,loc,error.message||"CareerFinder could not complete the AI search.");
