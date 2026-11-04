@@ -4,49 +4,23 @@ function showExternalSearches(q,loc){
  const suffix=mode==="remote"?" remote":mode==="hybrid"?" hybrid":mode==="onsite"?" on-site":"";
  const term=(q||"jobs")+suffix;
  const place=(loc||"").trim();
- const searchText=[term,place].filter(Boolean).join(" ");
  const encoded=encodeURIComponent(term);
  const placeEncoded=encodeURIComponent(place);
- const googleQuery=(site)=>"https://www.google.com/search?q="+encodeURIComponent("site:"+site+" "+searchText+" jobs");
- const bingQuery=(site)=>"https://www.bing.com/search?q="+encodeURIComponent("site:"+site+" "+searchText+" jobs");
  const links=[
-  ["LinkedIn Jobs","https://www.linkedin.com/jobs/search/?keywords="+encoded+"&location="+placeEncoded,"Search directly on LinkedIn"],
-  ["Indeed","https://www.indeed.com/jobs?q="+encoded+"&l="+placeEncoded,"Search directly on Indeed"],
-  ["Glassdoor","https://www.glassdoor.com/Job/jobs.htm?sc.keyword="+encoded+"&locName="+placeEncoded,"Search directly on Glassdoor"],
-  ["Himalayas","https://himalayas.app/jobs?search="+encoded,"Search directly on Himalayas"],
-  ["Wellfound","https://wellfound.com/jobs?query="+encoded,"Search directly on Wellfound"],
-  ["We Work Remotely","https://weworkremotely.com/remote-jobs/search?term="+encoded,"Search directly on We Work Remotely"],
-  ["Working Nomads","https://www.workingnomads.com/jobs?search="+encoded,"Search directly on Working Nomads"],
-  ["Jobspresso","https://jobspresso.co/?s="+encoded,"Search directly on Jobspresso"],
-  ["Remote.co","https://remote.co/remote-jobs/","Browse Remote.co vacancies"],
-  ["JustRemote","https://justremote.co/remote-jobs","Browse JustRemote vacancies"]
- ];
- const indexed=[
-  ["LinkedIn individual job posts","linkedin.com/jobs/view","Google-indexed LinkedIn vacancy pages"],
-  ["Glassdoor individual job posts","glassdoor.com/job-listing","Google-indexed Glassdoor vacancy pages"],
-  ["Indeed individual job posts","indeed.com/viewjob","Google-indexed Indeed vacancy pages"],
-  ["Himalayas job posts","himalayas.app/jobs","Google-indexed Himalayas vacancy pages"],
-  ["Wellfound job posts","wellfound.com/jobs","Google-indexed Wellfound vacancy pages"],
-  ["We Work Remotely job posts","weworkremotely.com","Google-indexed remote vacancies"],
-  ["Working Nomads job posts","workingnomads.com/jobs","Google-indexed Working Nomads vacancies"],
-  ["Jobspresso job posts","jobspresso.co","Google-indexed Jobspresso vacancies"],
-  ["Facebook public job posts","facebook.com","Google-indexed public Facebook pages and posts"]
- ];
- const employers=[
-  ["Greenhouse employer vacancies","boards.greenhouse.io"],
-  ["Lever employer vacancies","jobs.lever.co"],
-  ["Ashby employer vacancies","jobs.ashbyhq.com"],
-  ["Workable employer vacancies","apply.workable.com"],
-  ["SmartRecruiters vacancies","jobs.smartrecruiters.com"]
+  ["LinkedIn","https://www.linkedin.com/jobs/search/?keywords="+encoded+"&location="+placeEncoded],
+  ["Indeed","https://www.indeed.com/jobs?q="+encoded+"&l="+placeEncoded],
+  ["Glassdoor","https://www.glassdoor.com/Job/jobs.htm?sc.keyword="+encoded+"&locName="+placeEncoded],
+  ["Wellfound","https://wellfound.com/jobs?query="+encoded],
+  ["Himalayas","https://himalayas.app/jobs?search="+encoded],
+  ["We Work Remotely","https://weworkremotely.com/remote-jobs/search?term="+encoded]
  ];
  const box=el("more-sources");
- if(box)box.innerHTML='<div class="sources-heading"><div><h4>Search all job websites</h4><p>These links run your search on each job board. The indexed-post links search for individual vacancy pages on Google; open a result to view the original advert. Search-engine links are not imported or verified listings.</p></div><span class="free-tag">FREE SEARCH LINKS</span></div><div class="source-links">'+links.map(x=>'<a class="source-link" target="_blank" rel="noopener noreferrer" href="'+x[1]+'"><span>'+x[0]+'</span><small>'+x[2]+' ↗</small></a>').join("")+'</div><div class="sources-subheading"><h4>Find individual job advertisements</h4><p>Google searches limited to each website, using your job title and location.</p></div><div class="source-links">'+indexed.map(x=>'<a class="source-link" target="_blank" rel="noopener noreferrer" href="'+googleQuery(x[1])+'"><span>'+x[0]+'</span><small>'+x[2]+' ↗</small></a>').join("")+'</div><div class="sources-subheading"><h4>Search employer career websites</h4><p>Look for the same vacancies on company-hosted application pages.</p></div><div class="source-links">'+employers.map(x=>'<a class="source-link" target="_blank" rel="noopener noreferrer" href="'+googleQuery(x[1])+'"><span>'+x[0]+'</span><small>Search employer postings ↗</small></a>').join("")+'</div><div class="sources-subheading"><h4>Alternative indexed search</h4><p>Bing search links are provided as a second way to find public vacancy pages.</p></div><div class="source-links">'+indexed.slice(0,3).map(x=>'<a class="source-link" target="_blank" rel="noopener noreferrer" href="'+bingQuery(x[1])+'"><span>Bing · '+x[0]+'</span><small>Search indexed vacancy pages ↗</small></a>').join("")+'</div>';
+ if(box)box.innerHTML='<details class="external-search"><summary>More places to search <span>Optional links to other job websites</span></summary><p>These links open searches on the websites themselves. They are not vacancies imported or verified by CareerFinder.</p><div class="source-links">'+links.map(x=>'<a class="source-link" target="_blank" rel="noopener noreferrer" href="'+x[1]+'"><span>'+x[0]+' ↗</span></a>').join("")+'</div></details>';
 }
 function showFallbackSearches(q,loc,message){
  const box=el("jobs");
  box.className="empty";
- box.innerHTML='<h4>No live listings to display</h4><p>'+esc(message)+'</p><p><strong>Your search details:</strong> '+esc(q||"Any job")+' · '+esc(loc||"Any location")+'</p><p>Use the live search links below. They open results on the job websites themselves; those sites may require sign-in.</p>';
- el("more-sources").scrollIntoView({behavior:"smooth",block:"nearest"});
+ box.innerHTML='<h4>No matching vacancies found</h4><p>'+esc(message)+'</p><p><strong>Your search:</strong> '+esc(q||"Any job")+' · '+esc(loc||"Any location")+'</p><p>Try a broader title or location. You can also expand “More places to search” for optional external websites.</p>';
 }
 function experienceMatches(job,level){if(level==="any")return true;const title=(job.title||"").toLowerCase(),desc=(job.description||"").toLowerCase(),text=title+" "+desc+" "+(job.category||"")+" "+(job.tags||[]).join(" ");const patterns={ "no-experience":/no experience|no prior experience|without experience|experience not required|training provided|entry[- ]level|graduate|intern/i, internship:/intern(ship)?|trainee/i, entry:/entry[- ]level|graduate|recent graduate|new grad|no experience|junior/i, junior:/junior|0\s*[-–to]+\s*2 years|1\s*[-–to]+\s*2 years/i, associate:/associate|2\s*[-–to]+\s*4 years/i, mid:/mid[- ]level|3\s*[-–to]+\s*7 years|4\s*[-–to]+\s*6 years/i, senior:/senior|7\+? years|8\+? years|lead engineer|principal/i, manager:/manager|management|team lead|head of/i, executive:/director|executive|vice president|\\bvp\\b|chief [a-z]+ officer/i};if(patterns[level].test(text))return true;if(level==="junior"&&/entry[- ]level/.test(title))return true;if(level==="entry"&&/junior/.test(title))return true;return false}
 async function cachedFeed(key,url,ttl){const cacheKey="careerfinder-feed-"+key;try{const cached=JSON.parse(localStorage.getItem(cacheKey)||"null");if(cached&&Date.now()-cached.savedAt<ttl)return cached.value}catch{}const r=await fetch(url);if(!r.ok)throw Error("HTTP "+r.status);const value=await r.json();try{localStorage.setItem(cacheKey,JSON.stringify({savedAt:Date.now(),value}))}catch{}return value}
