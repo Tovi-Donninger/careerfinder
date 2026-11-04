@@ -36,7 +36,7 @@ function showSearchLoading(){
   if(line)line.textContent=stages[stage].label;
   if(bar)bar.style.width=stages[stage].progress+"%";
   if(track)track.setAttribute("aria-valuenow",String(stages[stage].progress));
-  const active=stage<2?0:stage<5?1:stage<8?2:3;
+  const active=stage===0?0:stage===1?1:stage<4?2:3;
   box.querySelectorAll("[data-step]").forEach(node=>{node.classList.toggle("active",Number(node.dataset.step)===active);node.classList.toggle("done",Number(node.dataset.step)<active)});
   const clock=el("loading-clock");
   if(clock)clock.textContent="Elapsed: "+Math.floor(elapsed/60)+":"+String(elapsed%60).padStart(2,"0");
@@ -46,7 +46,7 @@ function showSearchLoading(){
  searchLoadingTimer=setInterval(()=>{
   elapsed++;
   if(stage<stages.length-1)stage++;
-  else stage=6+((stage-6+1)%3);
+  else stage=stages.length-1;
   update();
  },4000);
 }
