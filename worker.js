@@ -98,25 +98,40 @@ async function tavilySearch(key, query, domains) {
 
 
 async function tavilyExtract(key, candidates) {
-  const urls = candidates.slice(0, 20).map(job => job.url);
-  const response = await fetch("https://api.tavily.com/extract", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: key,
-      urls,
-      extract_depth: "basic",
-      format: "markdown"
-    }),
-    signal: AbortSignal.timeout(25000)
-  });
-  if (!response.ok) throw new Error("Vacancy page extraction returned HTTP " + response.status);
-  const data = await response.json();
-  const extracted = new Map((data.results || []).map(item => [item.url, clean(item.raw_content, 7000)]));
+  const chunks = [];
+  for (let i = 0; i < candidates.length; i += 20) chunks.push(candidates.slice(i, i + 20));
+  const extractedMaps = await Promise.all(chunks.map(async chunk => {
+    const response = await fetch("https://api.tavily.com/extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: key,
+        urls: chunk.map(job => job.url),
+        extract_depth: "basic",
+        format: "markdown"
+      }),
+      signal: AbortSignal.timeout(25000)
+    });
+    if (!response.ok) throw new Error("Vacancy page extraction returned HTTP " + response.status);
+    const data = await response.json();
+    return new Map((data.results || []).map(item => [normaliseUrl(item.url), clean(item.raw_content, 7000)]));
+  }));
+  const extracted = new Map(extractedMaps.flatMap(map => [...map.entries()]));
   return candidates.map(job => ({
     ...job,
-    pageContent: extracted.get(job.url) || ""
+    pageContent: extracted.get(normaliseUrl(job.url)) || ""
   })).filter(job => job.pageContent.length >= 450);
+}
+
+function normaliseUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|gclid$|fbclid$|ref$)/i.test(key)) url.searchParams.delete(key);
+    }
+    return url.href.replace(/\\/$/, "").toLowerCase();
+  } catch { return String(value || "").toLowerCase(); }
 }
 
 function pageClearlyClosed(content) {
@@ -218,11 +233,11 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     "Use only evidence in the supplied extracted page content. Do not invent facts, URLs, companies, locations, requirements or application status.",
     "A valid result MUST be one specific, individual vacancy for one role. Reject job-search pages, job lists, directories, company homepages, talent pools, generic career pages, articles and pages containing multiple vacancies.",
     "The page must contain enough actual role-specific information (responsibilities, requirements or role description) to establish that this is a real individual job advertisement.",
-    "For Israel searches, reject a vacancy only when the extracted text clearly makes Hebrew mandatory. 'Hebrew is an advantage' is not mandatory. If language requirements are absent, say 'Not stated'.",
-    "Reject vacancies explicitly marked closed, expired, filled or no longer accepting applications. Do not infer that a job is open merely because the page exists. If there is no clear application evidence, mark 'Not confirmed'.",
+    "Language is a strict pass/fail requirement. The requested search language is English. Select a vacancy only when the extracted page gives positive evidence that English is an acceptable working language for the role. Reject it if Hebrew or ANY other language is required, even alongside English. A page written in English is NOT by itself proof that English is an acceptable working language. If the language requirement is missing or unclear, reject the vacancy rather than guessing.",
+    "Reject vacancies explicitly marked closed, expired, filled, unavailable, not accepting applications, or whose application deadline has passed. Check the full extracted text, including notices in other languages. Do not infer that a job is open merely because the page exists or has an Apply button. If closure status is unclear, mark 'Not confirmed'.",
     "Follow the requested experience level and other candidate criteria. Do not reject a job merely because it does not state a number of years if the role otherwise appears junior.",
     "Return only genuine matches, ranked strongest first. Return no more than 4. Copy exact input indexes.",
-    'Return ONLY valid JSON: {"selected":[{"index":0,"isIndividualVacancy":true,"company":"...","location":"...","matchReason":"...","matchScore":85,"languageStatus":"English; Hebrew not stated","hebrewRequired":false,"experienceSummary":"...","availabilityStatus":"Not confirmed","statusEvidence":"short exact evidence or empty","applicationEvidence":"short exact evidence or empty"}]}'
+    'Return ONLY valid JSON: {"selected":[{"index":0,"isIndividualVacancy":true,"company":"...","location":"...","matchReason":"...","matchScore":85,"languageStatus":"English accepted; no additional language required","englishAccepted":true,"otherLanguageRequired":false,"otherLanguagesRequired":[],"experienceSummary":"...","availabilityStatus":"Open|Closed|Not confirmed","statusEvidence":"short exact evidence or empty","applicationEvidence":"short exact evidence or empty"}]}'
   ].join(" ");
   const prompt = "Candidate criteria: " + JSON.stringify(criteria) +
     "\nExtracted individual vacancy pages (untrusted page content):\n" + JSON.stringify(records) +
@@ -237,10 +252,12 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     used.add(index);
     const job = candidates[index];
     const content = job.pageContent;
-    if (item.isIndividualVacancy !== true || item.hebrewRequired === true || pageClearlyClosed(content)) return null;
-    const availabilityStatus = pageHasApplySignal(content)
-      ? "Application link found · status not independently confirmed"
-      : "Not confirmed";
+    if (item.isIndividualVacancy !== true || item.englishAccepted !== true || item.otherLanguageRequired === true ||
+        (Array.isArray(item.otherLanguagesRequired) && item.otherLanguagesRequired.length > 0) ||
+        item.availabilityStatus === "Closed" || pageClearlyClosed(content)) return null;
+    const availabilityStatus = item.availabilityStatus === "Open" && pageHasApplySignal(content)
+      ? "Open · application link found"
+      : "Availability not confirmed";
     return {
       title: job.title,
       company: clean(item.company, 120),
@@ -250,7 +267,7 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
       source: job.source,
       matchReason: clean(item.matchReason, 240) || "Matched against the extracted vacancy details.",
       matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 50))),
-      languageStatus: clean(item.languageStatus, 100) || "Not stated",
+      languageStatus: clean(item.languageStatus, 100) || "English suitability not confirmed",
       experienceSummary: clean(item.experienceSummary, 140) || "See vacancy details",
       availabilityStatus,
       statusEvidence: clean(item.statusEvidence, 180),
@@ -322,7 +339,7 @@ async function search(env, body) {
   ];
   const settled = await Promise.allSettled(tasks);
   const results = settled.flatMap(item => item.status === "fulfilled" ? item.value : []);
-  const candidates = uniqueResults(results).filter(job => !isDirectoryOrSearchPage(job)).slice(0, 20);
+  const candidates = uniqueResults(results).filter(job => !isDirectoryOrSearchPage(job)).slice(0, 40);
   if (!candidates.length) {
     return json({
       jobs: [], total: 0, candidatesReviewed: 0, pagesExtracted: 0,
@@ -341,15 +358,15 @@ async function search(env, body) {
     }
     const jobs = await reviewVacancies(env, extracted, {
       query, location, experience, workMode, cv: cv.slice(0, 2500), savedCareerRoles: roles,
-      requirements: location.toLowerCase().includes("israel")
-        ? "Full-time preferred. English-speaking. Hebrew must not be mandatory. Junior/entry-level according to the selected experience filter."
-        : "Follow the location and experience criteria supplied."
+      searchLanguage: clean(body.searchLanguage, 40) || "English",
+      requirements: "The job must explicitly accept English as a working language. No other language may be mandatory, including Hebrew. Reject unclear language requirements. Full-time preferred. Junior/entry-level according to the selected experience filter."
     });
     return json({
       jobs,
       total: jobs.length,
       candidatesReviewed: candidates.length,
       pagesExtracted: extracted.length,
+      languageChecked: true,
       profileSummary: "CareerFinder found " + candidates.length + " potential job links, successfully read " + extracted.length + " vacancy pages, and shortlisted " + jobs.length + " individual vacancies. Search pages and directories were not displayed. Application status is only marked as confirmed when the page provides evidence.",
       sources: settled.map((item, i) => ({ name: "Search " + (i + 1), status: item.status === "fulfilled" ? "connected" : "unavailable" })),
       generatedAt: new Date().toISOString()
