@@ -22,20 +22,37 @@ function showSearchLoading(){
  const box=el("jobs");
  box.className="search-loading";
  box.setAttribute("aria-live","polite");
- box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · LIVE SEARCH</span><h4>Finding your next opportunity</h4><p id="loading-stage">Understanding your search criteria…</p><div class="loading-track" role="progressbar" aria-label="Search progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"><span id="loading-progress"></span></div><div class="loading-steps"><span class="active" data-step="0"><i>01</i> Understand</span><span data-step="1"><i>02</i> Discover</span><span data-step="2"><i>03</i> Review</span><span data-step="3"><i>04</i> Shortlist</span></div><small class="loading-footnote">Searching job sites and comparing individual vacancies against your preferences. Progress updates as each phase is expected to run; results appear when the server responds.</small></div>';
- const stages=[{label:"Understanding your search criteria…",progress:12},{label:"Expanding job titles and related opportunities…",progress:28},{label:"Searching job boards and employer career pages…",progress:48},{label:"Reviewing individual listings against your requirements…",progress:70},{label:"Selecting and preparing your strongest matches…",progress:88}];
- let stage=0;
+ box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · LIVE SEARCH</span><h4>Finding your next opportunity</h4><p id="loading-stage">Understanding your search criteria…</p><div class="loading-track" role="progressbar" aria-label="Search progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"><span id="loading-progress"></span></div><div class="loading-steps"><span class="active" data-step="0"><i>01</i> Understand</span><span data-step="1"><i>02</i> Discover</span><span data-step="2"><i>03</i> Review</span><span data-step="3"><i>04</i> Shortlist</span></div><small class="loading-footnote">CareerFinder is still working while employer pages are checked. Progress is an estimate, not a live count of completed jobs.</small><small id="loading-clock" class="loading-footnote">Elapsed: 0:00</small></div>';
+ const stages=[
+  {label:"Understanding your search criteria…",progress:12},
+  {label:"Expanding job titles and related opportunities…",progress:25},
+  {label:"Searching relevant job boards and employer sites…",progress:40},
+  {label:"Collecting individual vacancy advertisements…",progress:58},
+  {label:"Comparing roles against your requirements…",progress:72},
+  {label:"Reading employer vacancy descriptions…",progress:84},
+  {label:"Checking that each page describes one specific job…",progress:90},
+  {label:"Removing duplicates and checking for closure notices…",progress:94},
+  {label:"Preparing your final shortlist…",progress:96}
+ ];
+ let stage=0,elapsed=0;
  const update=()=>{
   const line=el("loading-stage"),bar=el("loading-progress"),track=box.querySelector('[role="progressbar"]');
   if(line)line.textContent=stages[stage].label;
   if(bar)bar.style.width=stages[stage].progress+"%";
   if(track)track.setAttribute("aria-valuenow",String(stages[stage].progress));
-  const active=stage<2?stage:stage<4?2:3;
+  const active=stage<2?0:stage<5?1:stage<8?2:3;
   box.querySelectorAll("[data-step]").forEach(node=>{node.classList.toggle("active",Number(node.dataset.step)===active);node.classList.toggle("done",Number(node.dataset.step)<active)});
+  const clock=el("loading-clock");
+  if(clock)clock.textContent="Elapsed: "+Math.floor(elapsed/60)+":"+String(elapsed%60).padStart(2,"0");
  };
  update();
  if(searchLoadingTimer)clearInterval(searchLoadingTimer);
- searchLoadingTimer=setInterval(()=>{if(stage<stages.length-1){stage++;update();}},3800);
+ searchLoadingTimer=setInterval(()=>{
+  elapsed++;
+  if(stage<stages.length-1)stage++;
+  else stage=6+((stage-6+1)%3);
+  update();
+ },4000);
 }
 function stopSearchLoading(){
  if(searchLoadingTimer){clearInterval(searchLoadingTimer);searchLoadingTimer=null}
@@ -86,20 +103,36 @@ function showCVLoading(){
  const box=el("matches");
  box.className="panel cv-loading";
  box.setAttribute("aria-live","polite");
- box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · CV ASSESSMENT</span><h4>Finding the strengths in your experience</h4><p id="cv-loading-stage">Preparing your CV for assessment…</p><div class="loading-track" role="progressbar" aria-label="CV assessment progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="10"><span id="cv-loading-progress"></span></div><div class="loading-steps"><span class="active" data-cv-step="0"><i>01</i> Read CV</span><span data-cv-step="1"><i>02</i> Identify skills</span><span data-cv-step="2"><i>03</i> Match experience</span><span data-cv-step="3"><i>04</i> Suggest careers</span></div><small class="loading-footnote">Reviewing your education, work history and transferable skills. Your assessment will appear as soon as the AI responds.</small></div>';
- const stages=[{label:"Preparing your CV for assessment…",progress:12},{label:"Identifying your education and professional strengths…",progress:34},{label:"Finding transferable skills from your experience…",progress:58},{label:"Matching your background to realistic career paths…",progress:78},{label:"Preparing your personalised career suggestions…",progress:90}];
- let stage=0;
+ box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · CV ASSESSMENT</span><h4>Finding the strengths in your experience</h4><p id="cv-loading-stage">Preparing your CV for assessment…</p><div class="loading-track" role="progressbar" aria-label="CV assessment progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="10"><span id="cv-loading-progress"></span></div><div class="loading-steps"><span class="active" data-cv-step="0"><i>01</i> Read CV</span><span data-cv-step="1"><i>02</i> Identify skills</span><span data-cv-step="2"><i>03</i> Match experience</span><span data-cv-step="3"><i>04</i> Suggest careers</span></div><small class="loading-footnote">Your CV is being assessed. The final analysis can take a little longer; this indicator will keep updating while we wait.</small><small id="cv-loading-clock" class="loading-footnote">Elapsed: 0:00</small></div>';
+ const stages=[
+  {label:"Preparing your CV for assessment…",progress:12},
+  {label:"Identifying your education and professional strengths…",progress:30},
+  {label:"Finding transferable skills from your experience…",progress:48},
+  {label:"Reviewing your work history and achievements…",progress:65},
+  {label:"Matching your background to realistic career paths…",progress:78},
+  {label:"Checking that suggested roles fit your experience…",progress:88},
+  {label:"Organising your skills and qualifications…",progress:93},
+  {label:"Finishing your personalised career suggestions…",progress:96}
+ ];
+ let stage=0,elapsed=0;
  const update=()=>{
   const line=el("cv-loading-stage"),bar=el("cv-loading-progress"),track=box.querySelector('[role="progressbar"]');
   if(line)line.textContent=stages[stage].label;
   if(bar)bar.style.width=stages[stage].progress+"%";
   if(track)track.setAttribute("aria-valuenow",String(stages[stage].progress));
-  const active=stage<1?0:stage<2?1:stage<3?2:3;
+  const active=stage<1?0:stage<3?1:stage<5?2:3;
   box.querySelectorAll("[data-cv-step]").forEach(node=>{node.classList.toggle("active",Number(node.dataset.cvStep)===active);node.classList.toggle("done",Number(node.dataset.cvStep)<active)});
+  const clock=el("cv-loading-clock");
+  if(clock)clock.textContent="Elapsed: "+Math.floor(elapsed/60)+":"+String(elapsed%60).padStart(2,"0");
  };
  update();
  if(cvLoadingTimer)clearInterval(cvLoadingTimer);
- cvLoadingTimer=setInterval(()=>{if(stage<stages.length-1){stage++;update();}},3000);
+ cvLoadingTimer=setInterval(()=>{
+  elapsed++;
+  if(stage<stages.length-1)stage++;
+  else stage=5+((stage-5+1)%3);
+  update();
+ },3500);
 }
 function stopCVLoading(){if(cvLoadingTimer){clearInterval(cvLoadingTimer);cvLoadingTimer=null}}
 async function matchCV(){
