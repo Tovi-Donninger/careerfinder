@@ -44,3 +44,14 @@
 .sources-subheading{margin:22px 0 10px;padding-top:17px;border-top:1px solid var(--line)}
 .sources-subheading h4{font:700 13px Manrope;margin:0 0 5px;color:var(--ink)}
 .sources-subheading p{font-size:11px;line-height:1.5;color:var(--muted);margin:0}
+
+/* Compact, optional external job-board links */
+.external-search{padding:2px 0}
+.external-search summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:12px;font:700 13px Manrope;color:var(--ink)}
+.external-search summary::-webkit-details-marker{display:none}
+.external-search summary:after{content:"+";font:700 18px "DM Sans";color:#6b806f}
+.external-search[open] summary:after{content:"−"}
+.external-search summary span{font:500 10px "DM Sans";color:var(--muted);margin-left:auto}
+.external-search>p{font-size:11px;line-height:1.5;color:var(--muted);margin:12px 0}
+.external-search .source-links{grid-template-columns:repeat(3,minmax(0,1fr))}
+@media(max-width:600px){.external-search summary{align-items:flex-start;flex-direction:column;gap:4px}.external-search summary span{margin-left:0}.external-search .source-links{grid-template-columns:repeat(2,minmax(0,1fr))}}
