@@ -146,10 +146,14 @@ function isDirectoryOrSearchPage(job) {
   const title = clean(job.title, 200).toLowerCase();
   const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
 
-  // Known category/directory URL patterns, not individual vacancy pages.
-  if (/\/jobs?\/(in-|category|categories|search|browse|by-)/i.test(path)) return true;
-  if (/\/(search|job-search|jobs-search|vacancy-search|browse-jobs)(\/|$)/i.test(path)) return true;
-  if (host === "untalent.org" && /^\/jobs?\//i.test(path)) return true;
+  // Reject category, search, directory and multi-vacancy pages before AI review.
+  if (/\\/(jobs?|careers?)\\/(in-|category|categories|search|browse|by-|location|country|remote)(\\/|$)/i.test(path)) return true;
+  if (/\\/(search|job-search|jobs-search|vacancy-search|browse-jobs|job-categories|career-advice)(\\/|$)/i.test(path)) return true;
+  if (/\\/(jobs?|careers?)\\/?$/i.test(path) && !/[?&](gh_jid|jobid|job_id|jid)=/i.test(parsed.search)) return true;
+  if (host === "untalent.org" && /^\\/jobs?\\//i.test(path)) return true;
+  if (/(^|\\.)jobrapido\\.|(^|\\.)jooble\\.|(^|\\.)adzuna\\./i.test(host) && !/\\/(job|vacancy|position)\\//i.test(path)) return true;
+  const queryText = (parsed.search || "").toLowerCase();
+  if (/([?&])(q|query|keywords|keyword|search|what|where)=/.test(queryText) && /\\/(jobs?|careers?|search)(\\/|$)/i.test(path)) return true;
 
   // Reject generic page titles that describe collections rather than one role.
   const genericTitles = [
@@ -215,6 +219,28 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
   }).filter(Boolean);
 }
 
+function experienceFits(job, level) {
+  if (!level || level === "any") return true;
+  const title = clean(job.title, 200).toLowerCase();
+  const text = (title + " " + clean(job.description, 1400)).toLowerCase();
+  const years = [...text.matchAll(/(?:at least |minimum of |minimum |over |more than )?(\\d{1,2})\\s*\\+?\\s*(?:years?|yrs?)(?: of experience)?/g)].map(m => Number(m[1]));
+  const maxYears = years.length ? Math.max(...years) : 0;
+  const explicitNoExperience = /no experience (?:required|needed|necessary)|without (?:prior |previous )?experience|experience not required|training provided|entry[- ]level|graduate role|recent graduate/i.test(text);
+  const seniorSignals = /\\b(senior|lead|principal|head of|director|chief|vice president|vp)\\b/.test(title);
+  const managerSignals = /\\b(manager|management|team lead|head of)\\b/.test(title);
+  const juniorSignals = /\\b(junior|assistant|trainee|intern|graduate|entry[- ]level|coordinator)\\b/.test(title);
+  if (level === "no-experience") return explicitNoExperience && maxYears === 0 && !seniorSignals && !managerSignals;
+  if (level === "internship") return /intern(ship)?|trainee/i.test(text);
+  if (level === "entry") return (explicitNoExperience || juniorSignals) && maxYears <= 1 && !seniorSignals && !managerSignals;
+  if (level === "junior") return (juniorSignals || explicitNoExperience || (maxYears > 0 && maxYears <= 2)) && maxYears <= 2 && !seniorSignals && !managerSignals;
+  if (level === "associate") return /\\bassociate\\b/i.test(title) && maxYears <= 4 && !seniorSignals;
+  if (level === "mid") return /\\b(mid[- ]level|experienced|specialist)\\b/i.test(title) && maxYears >= 3 && maxYears <= 7 && !seniorSignals;
+  if (level === "senior") return seniorSignals || maxYears >= 7;
+  if (level === "manager") return managerSignals;
+  if (level === "executive") return /\\b(director|executive|vice president|vp|chief)\\b/i.test(title);
+  return true;
+}
+
 async function reviewVacancies(env, candidates, criteria) {
   const batches = [];
   for (let i = 0; i < candidates.length; i += 8) {
@@ -228,7 +254,7 @@ async function reviewVacancies(env, candidates, criteria) {
     const failure = results.find(result => result.status === "rejected");
     throw new Error(failure ? clean(failure.reason?.message || failure.reason, 180) : "No genuine vacancies passed the AI review.");
   }
-  return selected.sort((a, b) => b.matchScore - a.matchScore).slice(0, 15).map(({_order, ...job}) => job);
+  return selected.filter(job => experienceFits(job, criteria.experience)).sort((a, b) => b.matchScore - a.matchScore).slice(0, 15).map(({_order, ...job}) => job);
 }
 async function search(env, body) {
   if (!env.TAVILY_API_KEY) return json({ error: "Job search is not configured. Add the TAVILY_API_KEY Worker secret." }, 503);
