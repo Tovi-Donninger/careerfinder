@@ -35,7 +35,7 @@ async function search(e){
  const cv=el("cv").value.trim();
  const roles=(data.roles||[]).slice(0,5);
  if(!q&&!loc&&!cv&&!roles.length){toast("Enter a job title, location or CV first.");return}
- searches++;stats();showExternalSearches(q,loc);
+ searches++;stats();document.querySelectorAll(".ai-summary").forEach(x=>x.remove());showExternalSearches(q,loc);
  el("jobs").className="empty";el("jobs").textContent="AI is analysing your preferences and searching job websites…";
  el("result-count").textContent="AI search in progress";
  try{
