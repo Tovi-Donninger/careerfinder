@@ -77,7 +77,7 @@ async function search(e){
  try{
   const response=await fetch("https://careerfinder-search.tovidonninger.workers.dev/api/search",{
    method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},
-   body:JSON.stringify({query:q,location:loc,experience:level,workMode:mode,cv,roles})
+   body:JSON.stringify({query:q,location:loc,experience:level,workMode:mode,searchLanguage:el("search-language")?.value||"English",cv,roles})
   });
   const payload=await response.json();stopSearchLoading();
   if(!response.ok)throw Error(payload.error||"Search service returned HTTP "+response.status);
