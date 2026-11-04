@@ -158,41 +158,55 @@ async function selectTopJobs(env, candidates, preferences) {
     source: job.source,
     location: job.location || "",
     url: job.url,
-    description: (job.description || "").slice(0, 520)
+    description: (job.description || "").slice(0, 420)
   }));
 
   const system = [
-    "You are a careful recruitment shortlist reviewer.",
-    "Compare each vacancy with the candidate criteria: job-title fit, location, experience level, work arrangement, transferable skills and explicit language requirements.",
-    "Use only supplied information. Never invent requirements or qualifications.",
-    "Exclude search pages, homepages, articles, advice pages and obvious duplicates. Prefer direct individual vacancy pages.",
-    "Do not reject a vacancy only because a detail is missing from the snippet; note uncertainty in the reason.",
-    "Return one valid JSON object with a selected array. Each selected item must contain index, matchReason and matchScore.",
-    "Select up to 10 strongest relevant individual vacancies, ordered best first. Use only indexes from the input. If plausible matches exist, do not return an empty list.",
-    "Keep each matchReason under 18 words. Return JSON only, with no markdown."
+    "You are a recruitment shortlist reviewer.",
+    "Review the supplied vacancy records against the candidate criteria.",
+    "Exclude search pages, homepages, articles, advice pages and duplicates. Prefer direct individual vacancy pages.",
+    "Use only supplied facts. Do not invent requirements. Missing details are unknown, not automatic disqualifiers.",
+    "Your entire answer MUST be exactly one JSON object in this exact format:",
+    '{"selected":[{"index":0,"matchReason":"Relevant junior role with matching duties","matchScore":85}]}',
+    "The selected value MUST be an array. Each index MUST be copied from an input record. Select up to 10 strongest matches, best first. Return no markdown, no explanation and no other keys."
   ].join(" ");
 
   let parsed = null;
   let lastError = null;
 
-  for (const attempt of [0, 1]) {
+  for (const attempt of [0, 1, 2]) {
     try {
       const items = attempt === 0
         ? shortlist
-        : shortlist.map(({ index, title, source, location }) => ({ index, title, source, location }));
+        : attempt === 1
+          ? shortlist.map(({ index, title, source, location, url }) => ({ index, title, source, location, url }))
+          : shortlist.map(({ index, title, source }) => ({ index, title, source }));
 
       const prompt = [
         "Candidate criteria: " + JSON.stringify(preferences),
-        "Vacancy results: " + JSON.stringify(items),
-        "Return ONLY valid JSON with a selected array. Each item must have index, matchReason and matchScore. Maximum 10."
+        "Vacancy records: " + JSON.stringify(items),
+        'Output exactly this JSON structure, populated with the best matching input indexes: {"selected":[{"index":0,"matchReason":"short reason","matchScore":85}]}',
+        "If there are plausible matches, select them. Never make up an index."
       ].join("\n");
 
-      const raw = await askAI(env, system, prompt, attempt === 0 ? 1400 : 1100);
+      const raw = await askAI(env, system, prompt, attempt === 0 ? 1500 : 1200);
       parsed = extractJSON(raw);
-      if (!Array.isArray(parsed.selected)) {
-        throw new Error("AI response did not contain a selected list.");
+
+      // Accept common array-key variations from models, but always validate
+      // every returned index against the original candidate list below.
+      let list = Array.isArray(parsed) ? parsed : (
+        parsed.selected || parsed.shortlist || parsed.matches ||
+        parsed.jobs || parsed.results || parsed.recommendations
+      );
+
+      if (!Array.isArray(list)) {
+        const keys = parsed && typeof parsed === "object" ? Object.keys(parsed).join(", ") : typeof parsed;
+        throw new Error("AI response did not contain a vacancy array. Returned fields: " + (keys || "none"));
       }
-      break;
+
+      parsed = { selected: list };
+      if (parsed.selected.length) break;
+      if (attempt === 2) throw new Error("AI returned an empty shortlist.");
     } catch (error) {
       lastError = error;
       parsed = null;
@@ -205,7 +219,8 @@ async function selectTopJobs(env, candidates, preferences) {
 
   const used = new Set();
   const selected = parsed.selected.slice(0, 10).map(item => {
-    const index = Number(item.index);
+    const rawIndex = item && (item.index ?? item.candidateIndex ?? item.candidate_index);
+    const index = Number(rawIndex);
 
     if (!Number.isInteger(index) || index < 0 || index >= shortlist.length || used.has(index)) {
       return null;
@@ -215,13 +230,13 @@ async function selectTopJobs(env, candidates, preferences) {
 
     return {
       ...candidates[index],
-      matchReason: clean(item.matchReason || "Selected based on the supplied job details.", 220),
-      matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 50)))
+      matchReason: clean(item.matchReason || item.reason || "Selected based on the supplied job details.", 220),
+      matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore ?? item.score) || 50)))
     };
   }).filter(Boolean);
 
   if (!selected.length) {
-    throw new Error("AI vacancy review returned no valid individual vacancies. Search results were not shown as an AI shortlist.");
+    throw new Error("AI vacancy review returned no valid candidate indexes. Search results were not shown as an AI shortlist.");
   }
 
   return selected;
