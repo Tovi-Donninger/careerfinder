@@ -637,10 +637,11 @@ async function search(env, body) {
     .sort((a, b) => b.score - a.score)
     .slice(0, 80);
   let jobs;
+  let pageCheckedCandidates = [];
   try {
     // Inspect the actual employer pages first. The AI must rank real vacancy
     // descriptions, not short search-engine snippets or directory pages.
-    const pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 12), 12);
+    pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 12), 12);
     if (!pageCheckedCandidates.length) {
       return json({
         jobs: [],
