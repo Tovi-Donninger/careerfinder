@@ -417,6 +417,7 @@ async function verifyVacancyStatus(job) {
 
 async function verifyAndLimitJobs(jobs, limit = 15) {
   const results = [];
+  const seenVacancyUrls = new Set();
   for (let i = 0; i < jobs.length && results.length < limit; i += 6) {
     const batch = jobs.slice(i, i + 6);
     const checks = await Promise.all(batch.map(job => verifyVacancyStatus(job)));
@@ -433,6 +434,9 @@ async function verifyAndLimitJobs(jobs, limit = 15) {
         availabilityNote: "The destination contains an individual vacancy description; check the employer page for the latest application status."
       };
       if (!isIndividualVacancyURL(verifiedJob) || !hasIsraelEvidence(verifiedJob)) continue;
+      const finalKey = verifiedJob.url.replace(/\/$/, "").toLowerCase();
+      if (seenVacancyUrls.has(finalKey)) continue;
+      seenVacancyUrls.add(finalKey);
       results.push(verifiedJob);
       if (results.length >= limit) break;
     }
