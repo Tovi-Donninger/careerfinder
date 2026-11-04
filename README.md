@@ -4,7 +4,7 @@ A free, universal job-search and career-discovery workspace.
 
 ## Current prototype (0.1.0)
 
-- Search job listings from the initial Arbeitnow public job-board feed.
+- Search live listings from three free public feeds: Arbeitnow (five pages), Jobicy (up to 200 remote listings) and Remotive (cached to respect its low request frequency).\n- Cache feed responses in the browser to reduce repeated API calls.\n- Filter listings by keywords, location, experience level and work arrangement, then deduplicate by original listing URL.\n- Open pre-filled searches on LinkedIn, Indeed, Glassdoor and other job boards, plus targeted Google searches for employer vacancies hosted on Greenhouse, Lever, Ashby, Workable and SmartRecruiters. These external searches are not imported into CareerFinder.
 - Paste CV/experience text or load a plain-text `.txt` CV.
 - Get transparent keyword-based career suggestions and save promising directions.
 - Track jobs, application links and statuses.
@@ -25,7 +25,7 @@ This is a static browser application. Open `index.html` directly, or serve the f
 
 This is an early prototype, not a production job-search service yet.
 
-- Only one public job feed is connected. It does not search LinkedIn, Indeed or every employer website.
+- The three connected feeds do not cover the whole job market and are not a replacement for LinkedIn, Indeed or Glassdoor. Those platforms open in separate tabs using pre-filled searches; their individual vacancies are not imported or tracked automatically inside CareerFinder.\n- Employer ATS discovery uses Google search links. It does not crawl or continuously monitor every company career page.\n- Job-feed availability and browser CORS policies can change. Failed feeds are skipped; no vacancy is guaranteed to be current or still open. The user should verify each vacancy on the employer website.\n- Remotive requests are cached for six hours to reduce calls; other feeds are cached for one hour. Browser-local caching is per device/browser, not a central shared cache.
 - Job-feed coverage, location fields, freshness and cross-border eligibility vary. Always confirm vacancies on the employer's own website.
 - CV matching is keyword-based, not an AI hiring prediction.
 - The first version accepts pasted text or `.txt` files; it does not extract PDF or Word files.
