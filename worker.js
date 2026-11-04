@@ -392,23 +392,48 @@ async function inspectVacancyPage(targetUrl, expectedTitle) {
     30000
   ).toLowerCase();
 
+  // Check both rendered page text and raw HTML. Some ATS platforms place
+  // closure notices in accessible labels, metadata, or hidden status elements.
+  const rawPageText = html
+    .replace(/&nbsp;|&#160;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\\u003c/gi, "<")
+    .replace(/\\u003e/gi, ">")
+    .toLowerCase();
   const closedPatterns = [
-    /this (job|position|vacancy|role|requisition) (is )?(no longer available|has been filled|is closed|has expired)/,
-    /(job|position|vacancy|role) (is )?(closed|expired|filled)/,
     /no longer accepting applications/,
-    /applications are now closed/,
-    /this job posting has expired/,
+    /not accepting applications/,
+    /applications? (are|is|have been|has been) (now )?(closed|ended|paused)/,
+    /application(s)? (for this|to this|for the) (job|position|role|vacancy) (is|are) (closed|no longer being accepted)/,
+    /application window (is )?(closed|over|has ended)/,
+    /this (job|position|vacancy|role|requisition|posting) (is )?(no longer available|has been filled|is closed|has expired|is no longer open)/,
+    /(job|position|vacancy|role|requisition|posting) (is )?(closed|expired|filled)/,
     /the job you are looking for (is )?no longer available/,
     /we are no longer accepting applications/,
     /requisition (is )?closed/,
-    /position has been filled/
+    /position has been filled/,
+    /this vacancy is no longer open/,
+    /this opportunity is no longer available/,
+    /this role is no longer taking applications/,
+    /the vacancy has been closed/,
+    /applications have closed/,
+    /sorry.{0,100}(position|job|vacancy).{0,100}(closed|filled|expired)/,
+    /thank you for your interest.{0,180}(no longer|closed|filled)/
   ];
-  if (closedPatterns.some(pattern => pattern.test(visible))) {
-    return { open: false, individual: false, reason: "Employer page indicates applications are closed or the vacancy is filled" };
+  if (closedPatterns.some(pattern => pattern.test(visible) || pattern.test(rawPageText))) {
+    return { open: false, individual: false, reason: "Employer page explicitly indicates that applications are no longer being accepted or the vacancy is closed" };
   }
 
   const postings = extractJobPosting(html);
   const structured = postings.length === 1 ? postings[0] : null;
+  if (structured && structured.validThrough) {
+    const closingTime = Date.parse(structured.validThrough);
+    if (Number.isFinite(closingTime) && closingTime < Date.now()) {
+      return { open: false, individual: false, reason: "The structured vacancy closing date has passed" };
+    }
+  }
   const structuredTitle = structured ? clean(structured.title, 180) : "";
   const heading = structuredTitle || pageTitle;
   const similarity = titleSimilarity(expectedTitle, heading);
