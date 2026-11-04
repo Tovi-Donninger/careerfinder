@@ -102,7 +102,7 @@ async function analyse(env, body) {
 async function tavilySearch(key, query, domains) {
   const payload = {
     api_key: key, query, search_depth: "basic", topic: "general",
-    max_results: 20, include_answer: false, include_raw_content: false
+    max_results: 20, include_answer: false, include_raw_content: true
   };
   if (domains && domains.length) payload.include_domains = domains;
   const response = await fetch("https://api.tavily.com/search", {
@@ -116,7 +116,7 @@ async function tavilySearch(key, query, domains) {
     title: clean(item.title, 220),
     company: "",
     location: "",
-    description: clean(item.content, 650),
+    description: clean(item.raw_content || item.content, 1800),
     url: item.url,
     score: Number(item.score || 0),
     source: (() => { try { return new URL(item.url).hostname.replace(/^www\./, ""); } catch { return "Web search"; } })(),
@@ -320,57 +320,120 @@ async function selectTopJobs(env, candidates, preferences) {
   return selected;
 }
 
-async function verifyVacancyStatus(job) {
-  // Verify the actual employer/ATS vacancy page, not just the search snippet.
-  // A page that is blocked or unreachable is marked unverified, not falsely called open.
-  try {
-    const response = await fetch(job.url, {
-      method: "GET",
-      redirect: "follow",
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; CareerFinderJobVerifier/1.0)", "Accept": "text/html,application/xhtml+xml" },
-      signal: AbortSignal.timeout(7000)
-    });
-    if (response.status === 404 || response.status === 410) {
-      return { open: false, reason: "Vacancy page returned HTTP " + response.status };
-    }
-    if (!response.ok) {
-      return { open: null, reason: "Employer page could not be verified (HTTP " + response.status + ")" };
-    }
-    const html = (await response.text()).slice(0, 180000).toLowerCase();
-    const closedPatterns = [
-      /this (job|position|vacancy|role|requisition) (is )?(no longer available|has been filled|is closed|has expired)/,
-      /(job|position|vacancy|role) (is )?(closed|expired|filled)/,
-      /no longer accepting applications/,
-      /applications are now closed/,
-      /this job posting has expired/,
-      /the job you are looking for (is )?no longer available/,
-      /we are no longer accepting applications/,
-      /requisition (is )?closed/,
-      /position has been filled/
-    ];
-    if (closedPatterns.some(pattern => pattern.test(html))) {
-      return { open: false, reason: "Employer page indicates applications are closed or the vacancy is filled" };
-    }
-    return { open: true, reason: "Employer vacancy page is live and no closure notice was detected" };
-  } catch (error) {
-    return { open: null, reason: "Could not verify employer page" };
+async function inspectVacancyPage(targetUrl) {
+  const response = await fetch(targetUrl, {
+    method: "GET",
+    redirect: "follow",
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; CareerFinderJobVerifier/1.0)",
+      "Accept": "text/html,application/xhtml+xml"
+    },
+    signal: AbortSignal.timeout(9000)
+  });
+  if (response.status === 404 || response.status === 410) {
+    return { open: false, reason: "Vacancy page returned HTTP " + response.status };
   }
+  if (!response.ok) {
+    return { open: null, reason: "Employer page could not be verified (HTTP " + response.status + ")" };
+  }
+
+  const html = (await response.text()).slice(0, 250000);
+  const lower = html.toLowerCase();
+  const titleMatch = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i) || html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  const pageTitle = clean(titleMatch ? titleMatch[1].replace(/<[^>]*>/g, " ") : "", 180);
+  const visible = clean(
+    html.replace(/<(script|style|noscript|svg)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'"),
+    12000
+  ).toLowerCase();
+
+  const closedPatterns = [
+    /this (job|position|vacancy|role|requisition) (is )?(no longer available|has been filled|is closed|has expired)/,
+    /(job|position|vacancy|role) (is )?(closed|expired|filled)/,
+    /no longer accepting applications/,
+    /applications are now closed/,
+    /this job posting has expired/,
+    /the job you are looking for (is )?no longer available/,
+    /we are no longer accepting applications/,
+    /requisition (is )?closed/,
+    /position has been filled/
+  ];
+  if (closedPatterns.some(pattern => pattern.test(visible))) {
+    return { open: false, reason: "Employer page indicates applications are closed or the vacancy is filled" };
+  }
+
+  const structuredJob = /"@type"\s*:\s*"jobposting"/i.test(html);
+  const sectionSignals = [
+    /responsibilit|what you will do|what you'll do|your role|role overview/,
+    /requirement|qualification|what you bring|what you'll need|what you will need/,
+    /experience|skills|education|about the role|job description/
+  ].filter(pattern => pattern.test(visible)).length;
+  const listPage = /all (open )?(jobs|positions|vacancies)|browse (jobs|opportunities)|search (jobs|open positions)|job opportunities at|careers home/i.test(pageTitle + " " + visible.slice(0, 1200));
+  const applicationPage = /\/(apply|application|submit-application)\/?$/i.test(new URL(response.url || targetUrl).pathname)
+    || /application form|submit your application|candidate application/i.test(pageTitle);
+
+  return {
+    open: true,
+    url: response.url || targetUrl,
+    title: pageTitle,
+    description: visible.slice(0, 1800),
+    individual: !listPage && !applicationPage && (structuredJob || (visible.length >= 450 && sectionSignals >= 2)),
+    reason: listPage
+      ? "The destination appears to be a general job-listing page"
+      : applicationPage
+        ? "The destination appears to be an application form rather than a job description"
+        : "Employer page inspected"
+  };
+}
+
+async function verifyVacancyStatus(job) {
+  // Prefer the vacancy description over a direct application form.
+  const urls = [job.url];
+  try {
+    const original = new URL(job.url);
+    if (/\/(apply|application|submit-application)\/?$/i.test(original.pathname)) {
+      original.pathname = original.pathname.replace(/\/(apply|application|submit-application)\/?$/i, "").replace(/\/$/, "");
+      urls.unshift(original.href);
+    }
+  } catch {}
+
+  let lastResult = { open: null, individual: false, reason: "Could not verify employer page" };
+  for (const url of [...new Set(urls)]) {
+    try {
+      const result = await inspectVacancyPage(url);
+      if (result.open === false) return result;
+      if (result.individual) return result;
+      lastResult = result;
+    } catch (error) {
+      lastResult = { open: null, individual: false, reason: "Could not verify employer page" };
+    }
+  }
+  return lastResult;
 }
 
 async function verifyAndLimitJobs(jobs, limit = 15) {
   const results = [];
-  // Keep concurrency modest so one search does not overwhelm job-board sites.
-  for (let i = 0; i < jobs.length && results.length < limit; i += 8) {
-    const batch = jobs.slice(i, i + 8);
+  for (let i = 0; i < jobs.length && results.length < limit; i += 6) {
+    const batch = jobs.slice(i, i + 6);
     const checks = await Promise.all(batch.map(job => verifyVacancyStatus(job)));
     for (let j = 0; j < batch.length; j++) {
       const check = checks[j];
-      if (check.open === false) continue;
-      results.push({
+      // Do not show an unverified page, a general listings page, or an application-only URL.
+      if (check.open !== true || check.individual !== true || !check.url) continue;
+      const verifiedJob = {
         ...batch[j],
-        availabilityStatus: check.open === true ? "Page checked — no closure notice found" : "Could not verify — check employer application page",
-        availabilityNote: check.reason
-      });
+        url: check.url,
+        title: check.title && check.title.length > 3 ? check.title : batch[j].title,
+        description: check.description || batch[j].description,
+        availabilityStatus: "Employer vacancy description checked",
+        availabilityNote: "The destination contains an individual vacancy description; check the employer page for the latest application status."
+      };
+      if (!isIndividualVacancyURL(verifiedJob) || !hasIsraelEvidence(verifiedJob)) continue;
+      results.push(verifiedJob);
       if (results.length >= limit) break;
     }
   }
