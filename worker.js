@@ -118,7 +118,7 @@ async function search(env, body) {
     ["himalayas.app", "weworkremotely.com", "remote.co", "workingnomads.com", "jobspresso.co"]
   ];
   const tasks = [];
-  for (let i = 0; i < Math.min(queries.length, 4); i++) {
+  for (let i = 0; i < Math.min(queries.length, 3); i++) {
     const phrase = queries[i] + place + mode + exp + " jobs vacancies";
     const domains = boardGroups[i % boardGroups.length];
     tasks.push(tavilySearch(env.TAVILY_API_KEY, phrase, domains));
