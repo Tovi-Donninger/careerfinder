@@ -95,7 +95,7 @@ async function search(env, body) {
       "Work arrangement: " + (workMode || "any"),
       "CV: " + (cv || "not supplied"),
       "Already suggested roles: " + selectedRoles.join("; "),
-      "Generate up to 4 concise queries using realistic job titles, synonyms and transferable skills. Include the location and experience/work arrangement only when provided. Avoid generic advice. Suggest up to 5 adjacent job titles if a CV is supplied."
+      "Generate up to 3 concise queries using realistic job titles, synonyms and transferable skills. Include the location and experience/work arrangement only when provided. Avoid generic advice. Suggest up to 5 adjacent job titles if a CV is supplied."
     ].join("\n");
     const raw = await askAI(env, "You are a job-search query planner. Never invent jobs or employers. Output valid JSON only.", prompt, 1100);
     const planned = extractJSON(raw);
