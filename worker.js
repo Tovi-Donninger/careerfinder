@@ -139,6 +139,36 @@ async function planSearches(env, body, location) {
   ];
 }
 
+function isDirectoryOrSearchPage(job) {
+  let parsed;
+  try { parsed = new URL(job.url); } catch { return true; }
+  const path = decodeURIComponent(parsed.pathname || "").toLowerCase();
+  const title = clean(job.title, 200).toLowerCase();
+  const host = parsed.hostname.replace(/^www\\./, "").toLowerCase();
+
+  // Known category/directory URL patterns, not individual vacancy pages.
+  if (/\\/jobs?\\/(in-|category|categories|search|browse|by-)/i.test(path)) return true;
+  if (/\\/(search|job-search|jobs-search|vacancy-search|browse-jobs)(\\/|$)/i.test(path)) return true;
+  if (host === "untalent.org" && /^\\/jobs?\\//i.test(path)) return true;
+
+  // Reject generic page titles that describe collections rather than one role.
+  const genericTitles = [
+    /^jobs? in .+/,
+    /^.+ jobs? in .+/,
+    /^.+ vacancies in .+/,
+    /^.+ job vacancies$/,
+    /^all .+ jobs?$/,
+    /^search (for )?jobs?$/,
+    /^browse (all )?jobs?$/,
+    /^job listings?$/,
+    /^career opportunities$/,
+    /^latest jobs?$/,
+    /^find jobs?$/
+  ];
+  if (genericTitles.some(pattern => pattern.test(title))) return true;
+  return false;
+}
+
 async function reviewVacancyBatch(env, candidates, criteria, offset) {
   const records = candidates.map((job, index) => ({
     index,
@@ -222,7 +252,7 @@ async function search(env, body) {
   ];
   const settled = await Promise.allSettled(tasks);
   const results = settled.flatMap(item => item.status === "fulfilled" ? item.value : []);
-  const candidates = uniqueResults(results).slice(0, 24);
+  const candidates = uniqueResults(results).filter(job => !isDirectoryOrSearchPage(job)).slice(0, 24);
   if (!candidates.length) {
     return json({
       jobs: [], total: 0, candidatesReviewed: 0,
@@ -242,7 +272,7 @@ async function search(env, body) {
       jobs,
       total: jobs.length,
       candidatesReviewed: candidates.length,
-      profileSummary: "AI reviewed " + candidates.length + " individual search results and shortlisted " + jobs.length + " relevant vacancies. Application status is marked only where the listing provides clear evidence.",
+      profileSummary: "AI reviewed " + candidates.length + " individual vacancy pages and shortlisted " + jobs.length + " relevant vacancies. Directory and search-result pages were excluded. Application status is marked only where the listing provides clear evidence.",
       sources: settled.map((item, i) => ({ name: "Search " + (i + 1), status: item.status === "fulfilled" ? "connected" : "unavailable" })),
       generatedAt: new Date().toISOString()
     });
