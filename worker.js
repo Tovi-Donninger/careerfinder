@@ -139,39 +139,35 @@ async function planSearches(env, body, location) {
   ];
 }
 
-async function reviewVacancies(env, candidates, criteria) {
-  const records = candidates.slice(0, 60).map((job, index) => ({
+async function reviewVacancyBatch(env, candidates, criteria, offset) {
+  const records = candidates.map((job, index) => ({
     index,
     title: job.title,
     website: job.source,
     url: job.url,
-    details: job.description.slice(0, 1000)
+    details: job.description.slice(0, 520)
   }));
   const system = [
-    "You are a careful recruitment researcher. You must shortlist REAL, individual job vacancies from the supplied search records.",
-    "Do not invent or rewrite vacancy facts. Use only the supplied records.",
-    "Reject job-search pages, category pages, directories, employer homepages, profiles, articles, general career pages, duplicate listings and pages advertising multiple roles.",
-    "A record must describe one specific job and have a direct link to that job. Never return a search-results URL as a vacancy.",
-    "The target location is Israel unless the user specifies another location. The actual job must be based in the target location; unrelated mentions do not count.",
-    "For Israel searches, prioritise full-time roles where English is sufficient. Reject a job if Hebrew is explicitly a mandatory requirement. If language requirements are not stated, label them 'Not stated'; do not assume Hebrew is unnecessary.",
-    "Respect the requested experience level. Prioritise junior, assistant, coordinator, administrator, graduate and entry-level roles when the user asks for junior or entry-level work.",
-    "Reject a vacancy only when the supplied details clearly say it is closed, expired, filled or no longer accepting applications. If status is unclear, keep it and label it 'Not confirmed'.",
-    "Do not infer missing company, location, salary, language or experience facts. Do not invent an application URL. The returned URL must be copied exactly from the chosen input record.",
-    "Rank the strongest matches first. Return up to 15. If fewer than 15 genuine matches exist, return only those; never pad the list.",
-    "Return ONLY JSON in this format: {\"selected\":[{\"index\":0,\"matchReason\":\"Short factual reason\",\"matchScore\":85,\"languageStatus\":\"English listed; Hebrew not listed\",\"availabilityStatus\":\"Not confirmed\"}]}. No markdown."
+    "You shortlist genuine individual job advertisements. Use only the supplied records; never invent facts or URLs.",
+    "Reject search/category pages, directories, profiles, articles, company homepages and pages covering multiple jobs. Keep only one specific vacancy with a direct job link.",
+    "The job must be in the requested location. For Israel, reject only if Hebrew is explicitly mandatory; otherwise say whether language requirements are stated or not stated. Prefer English-friendly full-time jobs.",
+    "Follow the requested experience level. Prefer junior, assistant, coordinator, administrator and entry-level roles when relevant.",
+    "Reject only listings explicitly marked closed, expired, filled or no longer accepting applications. If unclear, use 'Not confirmed'.",
+    "Return at most 8 strong matches, ranked best first. Do not pad. Copy the exact input index.",
+    "Return ONLY JSON: {\"selected\":[{\"index\":0,\"company\":\"...\",\"location\":\"...\",\"matchReason\":\"...\",\"matchScore\":80,\"languageStatus\":\"Not stated\",\"availabilityStatus\":\"Not confirmed\"}]}. Use empty strings for unknown company/location."
   ].join(" ");
-  const prompt = "Candidate criteria:\n" + JSON.stringify(criteria) + "\n\nSearch records:\n" + JSON.stringify(records) +
-    "\n\nSelect the best matching individual vacancies. Use the exact record indexes. Return as many as genuinely qualify, up to 15.";
-  const parsed = extractJSON(await askAI(env, system, prompt, 2600));
-  const list = Array.isArray(parsed) ? parsed : parsed.selected;
-  if (!Array.isArray(list)) throw new Error("AI did not return a vacancy shortlist.");
+  const prompt = "Criteria: " + JSON.stringify(criteria) + "\nVacancy search records:\n" + JSON.stringify(records) +
+    "\nSelect genuine matching vacancies only. Use the exact indexes shown.";
+  const parsed = extractJSON(await askAI(env, system, prompt, 1100));
+  const selected = Array.isArray(parsed) ? parsed : parsed.selected;
+  if (!Array.isArray(selected)) throw new Error("AI did not return a shortlist.");
   const used = new Set();
-  return list.slice(0, 30).map(item => {
+  return selected.slice(0, 8).map(item => {
     const index = Number(item.index);
     if (!Number.isInteger(index) || index < 0 || index >= records.length || used.has(index)) return null;
     used.add(index);
     const job = candidates[index];
-    const availability = clean(item.availabilityStatus, 50);
+    const availability = clean(item.availabilityStatus, 50) || "Not confirmed";
     if (/closed|expired|filled|no longer/i.test(availability)) return null;
     return {
       title: job.title,
@@ -183,11 +179,27 @@ async function reviewVacancies(env, candidates, criteria) {
       matchReason: clean(item.matchReason, 220) || "Selected by AI based on the vacancy details.",
       matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 50))),
       languageStatus: clean(item.languageStatus, 90) || "Not stated",
-      availabilityStatus: availability || "Not confirmed"
+      availabilityStatus: availability,
+      _order: offset + index
     };
-  }).filter(Boolean).slice(0, 15);
+  }).filter(Boolean);
 }
 
+async function reviewVacancies(env, candidates, criteria) {
+  const batches = [];
+  for (let i = 0; i < candidates.length; i += 8) {
+    batches.push({ jobs: candidates.slice(i, i + 8), offset: i });
+  }
+  const results = await Promise.allSettled(
+    batches.map(batch => reviewVacancyBatch(env, batch.jobs, criteria, batch.offset))
+  );
+  const selected = results.flatMap(result => result.status === "fulfilled" ? result.value : []);
+  if (!selected.length) {
+    const failure = results.find(result => result.status === "rejected");
+    throw new Error(failure ? clean(failure.reason?.message || failure.reason, 180) : "No genuine vacancies passed the AI review.");
+  }
+  return selected.sort((a, b) => b.matchScore - a.matchScore).slice(0, 15).map(({_order, ...job}) => job);
+}
 async function search(env, body) {
   if (!env.TAVILY_API_KEY) return json({ error: "Job search is not configured. Add the TAVILY_API_KEY Worker secret." }, 503);
   const query = clean(body.query, 180);
@@ -209,7 +221,7 @@ async function search(env, body) {
   ];
   const settled = await Promise.allSettled(tasks);
   const results = settled.flatMap(item => item.status === "fulfilled" ? item.value : []);
-  const candidates = uniqueResults(results).slice(0, 60);
+  const candidates = uniqueResults(results).slice(0, 24);
   if (!candidates.length) {
     return json({
       jobs: [], total: 0, candidatesReviewed: 0,
