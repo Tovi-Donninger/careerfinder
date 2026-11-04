@@ -519,7 +519,7 @@ async function verifyVacancyStatus(job) {
 }
 
 async function verifyAndLimitJobs(jobs, limit = 15) {
-  const checks = await Promise.all(jobs.slice(0, 16).map(job => verifyVacancyStatus(job)));
+  const checks = await Promise.all(jobs.slice(0, 12).map(job => verifyVacancyStatus(job)));
   const results = [];
   const seen = new Set();
   for (let i = 0; i < checks.length; i++) {
@@ -572,7 +572,7 @@ async function search(env, body) {
     ].join("\n");
     const raw = await askAI(env, "You are a job-search query planner. Never invent jobs or employers. Output valid JSON only.", prompt, 1100);
     const planned = extractJSON(raw);
-    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 4).map(x => clean(x, 220)).filter(Boolean) : [];
+    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 3).map(x => clean(x, 220)).filter(Boolean) : [];
     suggestions = Array.isArray(planned.careerSuggestions) ? planned.careerSuggestions.slice(0, 5).map(x => ({
       title: clean(x.title, 100), reason: clean(x.reason, 260), searchTerms: clean(x.searchTerms || x.title, 150)
     })).filter(x => x.title) : [];
@@ -597,7 +597,7 @@ async function search(env, body) {
     ["jobylon.com", "comeet.com", "breezy.hr", "workable.com", "ashbyhq.com"]
   ];
   const tasks = [];
-  for (let i = 0; i < Math.min(queries.length, 4); i++) {
+  for (let i = 0; i < Math.min(queries.length, 3); i++) {
     const phrase = queries[i] + place + mode + exp + " jobs vacancies";
     const domains = boardGroups[i % boardGroups.length];
     tasks.push(tavilySearch(env.TAVILY_API_KEY, phrase, domains));
@@ -640,13 +640,13 @@ async function search(env, body) {
   try {
     // Inspect the actual employer pages first. The AI must rank real vacancy
     // descriptions, not short search-engine snippets or directory pages.
-    const pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 16), 16);
+    const pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 12), 12);
     if (!pageCheckedCandidates.length) {
       return json({
         jobs: [],
         total: 0,
         candidatesReviewed: candidates.length,
-        pagesChecked: Math.min(candidates.length, 16),
+        pagesChecked: Math.min(candidates.length, 12),
         sources,
         generatedAt: new Date().toISOString(),
         profileSummary: "CareerFinder checked the employer pages but could not confirm enough individual vacancy descriptions. No generic job-search pages were shown."
@@ -671,16 +671,21 @@ async function search(env, body) {
 }
 export default {
   async fetch(request, env) {
-    const origin = request.headers.get("Origin") || "";
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
-    if (origin && origin !== "https://tovi-donninger.github.io" && !origin.startsWith("http://localhost:")) return json({ error: "Origin not allowed." }, 403);
-    const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/") return json({ status: "online", service: "CareerFinder AI job search", endpoints: ["/api/analyse", "/api/search"] });
-    if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
-    let body;
-    try { body = await request.json(); } catch { return json({ error: "Invalid JSON request." }, 400); }
-    if (url.pathname === "/api/analyse") return analyse(env, body);
-    if (url.pathname === "/api/search") return search(env, body);
-    return json({ error: "Not found." }, 404);
+    try {
+      const origin = request.headers.get("Origin") || "";
+      if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+      if (origin && origin !== "https://tovi-donninger.github.io" && !origin.startsWith("http://localhost:")) return json({ error: "Origin not allowed." }, 403);
+      const url = new URL(request.url);
+      if (request.method === "GET" && url.pathname === "/") return json({ status: "online", service: "CareerFinder AI job search", endpoints: ["/api/analyse", "/api/search"] });
+      if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "Invalid JSON request." }, 400); }
+      if (url.pathname === "/api/analyse") return await analyse(env, body);
+      if (url.pathname === "/api/search") return await search(env, body);
+      return json({ error: "Not found." }, 404);
+    } catch (error) {
+      // Preserve CORS headers and expose the underlying Worker error to the UI.
+      return json({ error: "Worker request failed: " + clean(error?.message || error, 300) }, 500);
+    }
   }
 };
