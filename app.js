@@ -91,7 +91,7 @@ async function search(e){
   if(payload.profileSummary)el("jobs").insertAdjacentHTML("beforebegin",'<p class="ai-summary">'+esc(payload.profileSummary)+'</p>');
   if(!rows.length){showFallbackSearches(q,loc,"The AI search ran but did not find indexed vacancies for these criteria. Try broader keywords or another location.");return}
   el("jobs").className="";
-  el("jobs").innerHTML=rows.map((x,i)=>'<article class="job curated-job"><div class="job-main"><h4>'+esc(x.title)+'</h4><small>'+esc(x.company||x.source||"Job listing")+' · '+esc(x.location||"Location not stated")+'</small>'+(x.availabilityStatus?'<div class="job-meta"><span>'+esc(x.availabilityStatus)+'</span></div>':'')+'<p>'+esc(x.matchReason||"Selected by AI as a relevant match.")+'</p></div><div class="job-actions"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">View vacancy ↗</a></div></article>').join("");
+  el("jobs").innerHTML=rows.map((x,i)=>'<article class="job curated-job"><div class="job-main"><h4>'+esc(x.title)+'</h4><small>'+esc(x.company||x.source||"Job listing")+' · '+esc(x.location||"Location not stated")+'</small>'+(x.availabilityStatus?'<div class="job-meta"><span>'+esc(x.availabilityStatus)+'</span></div>':'')+(x.description?'<p class="job-description">'+esc(String(x.description).slice(0,280))+'</p>':'')+'<p class="match-reason">'+esc(x.matchReason||"Selected by AI as a relevant match.")+'</p></div><div class="job-actions"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">View vacancy ↗</a></div></article>').join("");
  }catch(error){
   stopSearchLoading();
   showFallbackSearches(q,loc,error.message||"CareerFinder could not complete the AI search.");
