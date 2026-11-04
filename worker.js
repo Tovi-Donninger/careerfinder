@@ -102,7 +102,7 @@ async function analyse(env, body) {
 async function tavilySearch(key, query, domains) {
   const payload = {
     api_key: key, query, search_depth: "basic", topic: "general",
-    max_results: 15, include_answer: false, include_raw_content: false
+    max_results: 20, include_answer: false, include_raw_content: false
   };
   if (domains && domains.length) payload.include_domains = domains;
   const response = await fetch("https://api.tavily.com/search", {
@@ -221,7 +221,7 @@ function hasIsraelEvidence(job) {
 async function selectTopJobs(env, candidates, preferences) {
   if (!candidates.length) return [];
 
-  const shortlist = candidates.slice(0, 60).map((job, index) => ({
+  const shortlist = candidates.slice(0, 80).map((job, index) => ({
     index,
     title: job.title,
     source: job.source,
@@ -290,7 +290,7 @@ async function selectTopJobs(env, candidates, preferences) {
   }
 
   const used = new Set();
-  const selected = parsed.selected.slice(0, 60).map(item => {
+  const selected = parsed.selected.slice(0, 80).map(item => {
     const rawIndex = item && (item.index ?? item.candidateIndex ?? item.candidate_index);
     const index = Number(rawIndex);
 
@@ -308,7 +308,7 @@ async function selectTopJobs(env, candidates, preferences) {
   }).filter(Boolean)
     .filter(job => !isSearchOrProfilePage(job))
     .filter(job => hasIsraelEvidence(job))
-    .slice(0, 15);
+    .slice(0, 30);
 
   if (!selected.length) {
     throw new Error("AI review found no direct individual vacancies with clear evidence of an Israel-based role. Search results and profiles were excluded.");
@@ -316,6 +316,64 @@ async function selectTopJobs(env, candidates, preferences) {
 
   return selected;
 }
+
+async function verifyVacancyStatus(job) {
+  // Verify the actual employer/ATS vacancy page, not just the search snippet.
+  // A page that is blocked or unreachable is marked unverified, not falsely called open.
+  try {
+    const response = await fetch(job.url, {
+      method: "GET",
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; CareerFinderJobVerifier/1.0)", "Accept": "text/html,application/xhtml+xml" },
+      signal: AbortSignal.timeout(7000)
+    });
+    if (response.status === 404 || response.status === 410) {
+      return { open: false, reason: "Vacancy page returned HTTP " + response.status };
+    }
+    if (!response.ok) {
+      return { open: null, reason: "Employer page could not be verified (HTTP " + response.status + ")" };
+    }
+    const html = (await response.text()).slice(0, 180000).toLowerCase();
+    const closedPatterns = [
+      /this (job|position|vacancy|role|requisition) (is )?(no longer available|has been filled|is closed|has expired)/,
+      /(job|position|vacancy|role) (is )?(closed|expired|filled)/,
+      /no longer accepting applications/,
+      /applications are now closed/,
+      /this job posting has expired/,
+      /the job you are looking for (is )?no longer available/,
+      /we are no longer accepting applications/,
+      /requisition (is )?closed/,
+      /position has been filled/
+    ];
+    if (closedPatterns.some(pattern => pattern.test(html))) {
+      return { open: false, reason: "Employer page indicates applications are closed or the vacancy is filled" };
+    }
+    return { open: true, reason: "Employer vacancy page is live and no closure notice was detected" };
+  } catch (error) {
+    return { open: null, reason: "Could not verify employer page" };
+  }
+}
+
+async function verifyAndLimitJobs(jobs, limit = 15) {
+  const results = [];
+  // Keep concurrency modest so one search does not overwhelm job-board sites.
+  for (let i = 0; i < jobs.length && results.length < limit; i += 8) {
+    const batch = jobs.slice(i, i + 8);
+    const checks = await Promise.all(batch.map(job => verifyVacancyStatus(job)));
+    for (let j = 0; j < batch.length; j++) {
+      const check = checks[j];
+      if (check.open === false) continue;
+      results.push({
+        ...batch[j],
+        availabilityStatus: check.open === true ? "Page checked — no closure notice found" : "Could not verify — check employer application page",
+        availabilityNote: check.reason
+      });
+      if (results.length >= limit) break;
+    }
+  }
+  return results;
+}
+
 async function search(env, body) {
   if (!env.TAVILY_API_KEY) return json({ error: "The job-search provider is not configured yet. Add TAVILY_API_KEY as a Worker secret." }, 503);
   const q = clean(body.query, 180);
@@ -338,7 +396,7 @@ async function search(env, body) {
       "Work arrangement: " + (workMode || "any"),
       "CV: " + (cv || "not supplied"),
       "Already suggested roles: " + selectedRoles.join("; "),
-      "Generate 5 to 6 distinct, concise queries using realistic job titles, synonyms and transferable skills. Vary the job-title wording to discover different individual vacancies, not just the same search results. Include the location and experience/work arrangement only when provided. Avoid generic advice. Suggest up to 5 adjacent job titles if a CV is supplied."
+      "Generate 8 distinct, concise queries using realistic job titles, synonyms and transferable skills. Vary the job-title wording to discover different individual vacancies, not just the same search results. Include the location and experience/work arrangement only when provided. Avoid generic advice. Suggest up to 5 adjacent job titles if a CV is supplied."
     ].join("\n");
     const raw = await askAI(env, "You are a job-search query planner. Never invent jobs or employers. Output valid JSON only.", prompt, 1100);
     const planned = extractJSON(raw);
@@ -359,10 +417,15 @@ async function search(env, body) {
   const boardGroups = [
     ["linkedin.com", "indeed.com", "glassdoor.com"],
     ["wellfound.com", "lever.co", "greenhouse.io", "ashbyhq.com", "smartrecruiters.com", "workable.com"],
-    ["himalayas.app", "weworkremotely.com", "remote.co", "workingnomads.com", "jobspresso.co"]
+    ["jobs.lever.co", "boards.greenhouse.io", "jobs.ashbyhq.com", "jobs.smartrecruiters.com", "apply.workable.com"],
+    ["jobvite.com", "icims.com", "personio.com", "bamboohr.com", "recruitee.com", "teamtailor.com"],
+    ["himalayas.app", "weworkremotely.com", "remote.co", "workingnomads.com", "jobspresso.co"],
+    ["linkedin.com", "indeed.com", "glassdoor.com", "lever.co", "greenhouse.io", "smartrecruiters.com"],
+    ["jobs.workday.com", "myworkdayjobs.com", "oraclecloud.com", "successfactors.com", "ultipro.com"],
+    ["jobylon.com", "comeet.com", "breezy.hr", "workable.com", "ashbyhq.com"]
   ];
   const tasks = [];
-  for (let i = 0; i < Math.min(queries.length, 6); i++) {
+  for (let i = 0; i < Math.min(queries.length, 8); i++) {
     const phrase = queries[i] + place + mode + exp + " jobs vacancies";
     const domains = boardGroups[i % boardGroups.length];
     tasks.push(tavilySearch(env.TAVILY_API_KEY, phrase, domains));
@@ -400,12 +463,13 @@ async function search(env, body) {
     .filter(item => isIndividualVacancyURL(item))
     .filter(item => hasIsraelEvidence(item))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 60);
+    .slice(0, 80);
   let jobs;
   try {
-    jobs = await selectTopJobs(env, candidates, {
+    const aiRankedJobs = await selectTopJobs(env, candidates, {
       query: q, location, experience, workMode, cv: cv.slice(0, 3500), savedCareerRoles: selectedRoles
     });
+    jobs = await verifyAndLimitJobs(aiRankedJobs, 15);
   } catch (error) {
     return json({ error: "Search results were found, but the vacancy review could not be completed. " + clean(error.message, 180) }, 502);
   }
@@ -415,7 +479,7 @@ async function search(env, body) {
     generatedAt: new Date().toISOString(),
     profileSummary: usedFallback
       ? "The AI review service was temporarily unavailable, so CareerFinder ranked the collected vacancies using your keywords and job details."
-      : "AI reviewed " + candidates.length + " search results and selected the strongest matching individual vacancies.",
+      : "AI reviewed " + candidates.length + " individual vacancy candidates, checked employer pages for closure notices, and selected up to 15 suitable jobs.",
     careerSuggestions: [], searchQueries: []
   });
 }
