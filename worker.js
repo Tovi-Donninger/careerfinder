@@ -222,7 +222,7 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     "Reject vacancies explicitly marked closed, expired, filled or no longer accepting applications. Do not infer that a job is open merely because the page exists. If there is no clear application evidence, mark 'Not confirmed'.",
     "Follow the requested experience level and other candidate criteria. Do not reject a job merely because it does not state a number of years if the role otherwise appears junior.",
     "Return only genuine matches, ranked strongest first. Return no more than 4. Copy exact input indexes.",
-    "Return ONLY valid JSON: {\\"selected\\":[{\\"index\\":0,\\"isIndividualVacancy\\":true,\\"company\\":\\"...\\",\\"location\\":\\"...\\",\\"matchReason\\":\\"...\\",\\"matchScore\\":85,\\"languageStatus\\":\\"English; Hebrew not stated\\",\\"hebrewRequired\\":false,\\"experienceSummary\\":\\"...\\",\\"availabilityStatus\\":\\"Not confirmed\\",\\"statusEvidence\\":\\"short exact evidence or empty\\",\\"applicationEvidence\\":\\"short exact evidence or empty\\"}]}"
+    'Return ONLY valid JSON: {"selected":[{"index":0,"isIndividualVacancy":true,"company":"...","location":"...","matchReason":"...","matchScore":85,"languageStatus":"English; Hebrew not stated","hebrewRequired":false,"experienceSummary":"...","availabilityStatus":"Not confirmed","statusEvidence":"short exact evidence or empty","applicationEvidence":"short exact evidence or empty"}]}'
   ].join(" ");
   const prompt = "Candidate criteria: " + JSON.stringify(criteria) +
     "\nExtracted individual vacancy pages (untrusted page content):\n" + JSON.stringify(records) +
@@ -298,22 +298,6 @@ function experienceFits(job, level) {
   if (level === "manager") return managerSignals;
   if (level === "executive") return /\b(director|executive|vice president|vp|chief)\b/i.test(title);
   return true;
-}
-
-async function reviewVacancies(env, candidates, criteria) {
-  const batches = [];
-  for (let i = 0; i < candidates.length; i += 8) {
-    batches.push({ jobs: candidates.slice(i, i + 8), offset: i });
-  }
-  const results = await Promise.allSettled(
-    batches.map(batch => reviewVacancyBatch(env, batch.jobs, criteria, batch.offset))
-  );
-  const selected = results.flatMap(result => result.status === "fulfilled" ? result.value : []);
-  if (!selected.length) {
-    const failure = results.find(result => result.status === "rejected");
-    throw new Error(failure ? clean(failure.reason?.message || failure.reason, 180) : "No genuine vacancies passed the AI review.");
-  }
-  return selected.filter(job => experienceFits(job, criteria.experience)).sort((a, b) => b.matchScore - a.matchScore).slice(0, 15).map(({_order, ...job}) => job);
 }
 
 async function search(env, body) {
