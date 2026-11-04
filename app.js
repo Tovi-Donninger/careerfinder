@@ -1,11 +1,28 @@
 const KEY="careerfinder-v1";let data;try{data=JSON.parse(localStorage.getItem(KEY))||{apps:[],roles:[],cv:""}}catch{data={apps:[],roles:[],cv:""}}let searches=0;const el=id=>document.getElementById(id);const esc=s=>String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));function save(){localStorage.setItem(KEY,JSON.stringify(data));stats()}function stats(){el("search-count").textContent=searches;el("role-count").textContent=data.roles.length;el("app-count").textContent=data.apps.length}function toast(s){el("toast").textContent=s;el("toast").classList.add("show");setTimeout(()=>el("toast").classList.remove("show"),2200)}
-function showFallbackSearches(q,loc,message){const term=[q,loc].filter(Boolean).join(" ");const encoded=encodeURIComponent(term);el("result-count").textContent="No listings from the connected feed";el("jobs").className="empty";el("jobs").innerHTML='<p>'+esc(message)+'</p><p>Try searching these free job sites directly:</p><p><a target="_blank" rel="noopener" href="https://www.google.com/search?q='+encoded+'+jobs">Google Jobs / web search ↗</a></p><p><a target="_blank" rel="noopener" href="https://www.linkedin.com/jobs/search/?keywords='+encodeURIComponent(q)+'&location='+encodeURIComponent(loc)+'">LinkedIn Jobs ↗</a></p><p><a target="_blank" rel="noopener" href="https://www.indeed.com/jobs?q='+encodeURIComponent(q)+'&l='+encodeURIComponent(loc)+'">Indeed ↗</a></p>'}
+function showExternalSearches(q,loc){
+ const encoded=encodeURIComponent([q,loc].filter(Boolean).join(" "));
+ const links=[
+  ["LinkedIn Jobs","https://www.linkedin.com/jobs/search/?keywords="+encodeURIComponent(q)+"&location="+encodeURIComponent(loc)],
+  ["Indeed","https://www.indeed.com/jobs?q="+encodeURIComponent(q)+"&l="+encodeURIComponent(loc)],
+  ["Glassdoor","https://www.glassdoor.com/Job/jobs.htm?sc.keyword="+encodeURIComponent(q)+"&locT=C&locName="+encodeURIComponent(loc)],
+  ["Facebook groups & posts","https://www.facebook.com/search/posts/?q="+encoded],
+  ["Google Jobs / web search","https://www.google.com/search?q="+encoded+"+jobs"]
+ ];
+ const box=el("more-sources");
+ if(box)box.innerHTML='<h4>Search more job sites</h4><p>Open these sites with your search terms pre-filled. Some may ask you to sign in.</p><div class="source-links">'+links.map(x=>'<a target="_blank" rel="noopener" href="'+x[1]+'">'+x[0]+' ↗</a>').join("")+'</div>';
+}
+function showFallbackSearches(q,loc,message){
+ showExternalSearches(q,loc);
+ el("result-count").textContent="No listings from connected feeds";
+ el("jobs").className="empty";
+ el("jobs").innerHTML='<p>'+esc(message)+'</p><p>The external job-site searches are available below.</p>';
+}
 function experienceMatches(job,level){if(level==="any")return true;const title=(job.title||"").toLowerCase(),desc=(job.description||"").toLowerCase(),text=title+" "+desc+" "+(job.category||"")+" "+(job.tags||[]).join(" ");const patterns={ "no-experience":/no experience|no prior experience|without experience|experience not required|training provided|entry[- ]level|graduate|intern/i, internship:/intern(ship)?|trainee/i, entry:/entry[- ]level|graduate|recent graduate|new grad|no experience|junior/i, junior:/junior|0\s*[-–to]+\s*2 years|1\s*[-–to]+\s*2 years/i, associate:/associate|2\s*[-–to]+\s*4 years/i, mid:/mid[- ]level|3\s*[-–to]+\s*7 years|4\s*[-–to]+\s*6 years/i, senior:/senior|7\+? years|8\+? years|lead engineer|principal/i, manager:/manager|management|team lead|head of/i, executive:/director|executive|vice president|\\bvp\\b|chief [a-z]+ officer/i};if(patterns[level].test(text))return true;if(level==="junior"&&/entry[- ]level/.test(title))return true;if(level==="entry"&&/junior/.test(title))return true;return false}
 async function search(e){
  e.preventDefault();
  const q=el("query").value.trim(),loc=el("location").value.trim(),level=el("experience").value;
  if(!q&&!loc){toast("Enter a job title or location.");return}
- searches++;stats();el("jobs").textContent="Searching connected job sources…";el("result-count").textContent="Searching";
+ searches++;stats();showExternalSearches(q,loc);el("jobs").textContent="Searching connected job sources…";el("result-count").textContent="Searching";
  const getJson=async url=>{const r=await fetch(url);if(!r.ok)throw Error("HTTP "+r.status);return r.json()};
  const tasks=[
   Promise.all([1,2,3].map(page=>getJson("https://www.arbeitnow.com/api/job-board-api?page="+page))).then(pages=>pages.flatMap(p=>Array.isArray(p.data)?p.data:[]).map(x=>({title:x.title,company:x.company_name,location:x.location,description:x.description,url:x.url,tags:x.tags||[],remote:!!x.remote,source:"Arbeitnow",sourceUrl:"https://www.arbeitnow.com/"}))),
