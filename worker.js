@@ -245,7 +245,7 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
       title: job.title,
       company: clean(item.company, 120),
       location: clean(item.location, 120),
-      description: clean(content, 520),
+      description: clean(content, 1800),
       url: job.url,
       source: job.source,
       matchReason: clean(item.matchReason, 240) || "Matched against the extracted vacancy details.",
