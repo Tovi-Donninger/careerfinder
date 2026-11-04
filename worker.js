@@ -75,6 +75,30 @@ async function tavilySearch(key, query, domains) {
   })).filter(x => x.title && x.url && /^https?:\/\//i.test(x.url));
 }
 
+function fallbackTopJobs(candidates, preferences) {
+  const terms = [preferences.query, ...(preferences.savedCareerRoles || [])].join(" ").toLowerCase().split(/[^a-z0-9+#]+/).filter(x => x.length > 2);
+  const location = (preferences.location || "").toLowerCase();
+  const generic = /\b(jobs? search|search results|career advice|how to|salary guide|home page|homepage|careers at)\b/i;
+  const scored = candidates.map(job => {
+    const title = (job.title || "").toLowerCase(), description = (job.description || "").toLowerCase(), url = (job.url || "").toLowerCase();
+    if (generic.test(job.title || "") || /^https?:\/\/[^/]+\/?$/.test(url)) return null;
+    let score = 35, hits = 0;
+    for (const term of terms) {
+      if (title.includes(term)) { score += 12; hits++; }
+      else if (description.includes(term)) { score += 4; hits++; }
+    }
+    if (location && (description.includes(location) || title.includes(location))) score += 8;
+    if (/\b(junior|entry.level|graduate|assistant|coordinator|associate|administrator|intern|trainee)\b/i.test(title)) score += 5;
+    if (/linkedin\.com\/jobs\/view|indeed\.com\/viewjob|lever\.co|greenhouse\.io|ashbyhq\.com|workable\.com/i.test(url)) score += 8;
+    return { job, score: Math.min(95, score), hits };
+  }).filter(Boolean).sort((a,b) => b.score-a.score);
+  return scored.slice(0,8).map(({job,score,hits}) => ({
+    ...job,
+    matchReason: hits ? "Ranked using matching job-title and vacancy details." : "Potentially relevant vacancy; check the employer listing for full requirements.",
+    matchScore: score
+  }));
+}
+
 async function selectTopJobs(env, candidates, preferences) {
   if (!candidates.length) return [];
   const shortlist = candidates.slice(0, 24).map((job, index) => ({index,title:job.title,source:job.source,description:(job.description||"").slice(0,260)}));
@@ -90,7 +114,10 @@ async function selectTopJobs(env, candidates, preferences) {
       parsed=null;lastError=new Error("AI response did not contain a selected list.");
     } catch(error) {lastError=error;parsed=null;}
   }
-  if(!parsed||!Array.isArray(parsed.selected)) throw lastError||new Error("AI shortlist could not be parsed.");
+  if(!parsed||!Array.isArray(parsed.selected)) {
+    // Keep search results available if the hosted AI model fails or returns invalid JSON.
+    return fallbackTopJobs(candidates, preferences);
+  }
   const used=new Set();
   return parsed.selected.slice(0,8).map(item=>{
     const index=Number(item.index);
@@ -171,12 +198,15 @@ async function search(env, body) {
       query: q, location, experience, workMode, cv: cv.slice(0, 3500), savedCareerRoles: selectedRoles
     });
   } catch (error) {
-    return json({ error: "Search results were found, but the AI shortlist step failed after a retry. Please try again. (" + clean(error.message, 180) + ")" }, 502);
+    return json({ error: "Search results were found, but the vacancy review could not be completed. " + clean(error.message, 180) }, 502);
   }
+  const usedFallback = jobs.length > 0 && jobs[0].matchReason && jobs[0].matchReason.startsWith("Ranked using");
   return json({
     jobs, total: jobs.length, candidatesReviewed: candidates.length, sources,
     generatedAt: new Date().toISOString(),
-    profileSummary: "AI reviewed " + candidates.length + " search results and selected the strongest matching individual vacancies.",
+    profileSummary: usedFallback
+      ? "The AI review service was temporarily unavailable, so CareerFinder ranked the collected vacancies using your keywords and job details."
+      : "AI reviewed " + candidates.length + " search results and selected the strongest matching individual vacancies.",
     careerSuggestions: [], searchQueries: []
   });
 }
