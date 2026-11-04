@@ -35,7 +35,7 @@ async function search(e){
  const cv=el("cv").value.trim();
  const roles=(data.roles||[]).slice(0,5);
  if(!q&&!loc&&!cv&&!roles.length){toast("Enter a job title, location or CV first.");return}
- searches++;stats();document.querySelectorAll(".ai-summary").forEach(x=>x.remove());showExternalSearches(q,loc);
+ searches++;stats();document.querySelectorAll(".ai-summary").forEach(x=>x.remove());const moreSources=el("more-sources");if(moreSources)moreSources.innerHTML="";
  el("jobs").className="empty";el("jobs").textContent="AI is analysing your preferences and searching job websites…";
  el("result-count").textContent="AI search in progress";
  try{
@@ -47,15 +47,11 @@ async function search(e){
   if(!response.ok)throw Error(payload.error||"Search service returned HTTP "+response.status);
   const rows=payload.jobs||[];
   const connected=(payload.sources||[]).filter(x=>x.status==="connected").length;
-  el("result-count").textContent=rows.length+" results · "+connected+" search groups connected";
+  el("result-count").textContent=rows.length+" AI-selected matches from "+(payload.candidatesReviewed||0)+" reviewed listings";
   if(payload.profileSummary)el("jobs").insertAdjacentHTML("beforebegin",'<p class="ai-summary">'+esc(payload.profileSummary)+'</p>');
   if(!rows.length){showFallbackSearches(q,loc,"The AI search ran but did not find indexed vacancies for these criteria. Try broader keywords or another location.");return}
   el("jobs").className="";
-  el("jobs").innerHTML=rows.map((x,i)=>'<article class="job"><div class="job-main"><h4>'+esc(x.title)+'</h4><small>'+esc(x.company||x.source||"Job listing")+' · '+esc(x.location||"Location not stated")+' · Found via '+esc(x.source||"Web search")+'</small><p>'+esc(x.description||"Open the original listing to review the full job description.")+'</p></div><div class="job-actions"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer" data-job-open="1" data-track-title="'+esc(x.title)+'" data-track-company="'+esc(x.company||x.source||"")+'" data-track-url="'+esc(x.url)+'">View original job ↗</a><button data-track="'+esc(x.title)+'" data-company="'+esc(x.company||x.source||"")+'" data-url="'+esc(x.url)+'">Track job +</button></div></article>').join("");
-  if(payload.careerSuggestions?.length){
-   const suggestionHtml=payload.careerSuggestions.map(x=>'<span class="suggestion-chip">'+esc(x.title)+'</span>').join("");
-   el("jobs").insertAdjacentHTML("beforeend",'<div class="ai-suggestions"><strong>Other career directions AI considered</strong><div>'+suggestionHtml+'</div></div>');
-  }
+  el("jobs").innerHTML=rows.map((x,i)=>'<article class="job curated-job"><div class="job-main"><h4>'+esc(x.title)+'</h4><small>'+esc(x.company||x.source||"Job listing")+' · '+esc(x.location||"Location not stated")+'</small><p>'+esc(x.matchReason||"Selected by AI as a relevant match.")+'</p></div><div class="job-actions"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">View vacancy ↗</a></div></article>').join("");
  }catch(error){
   showFallbackSearches(q,loc,error.message||"CareerFinder could not complete the AI search.");
   el("result-count").textContent="AI search unavailable";
