@@ -102,7 +102,7 @@ async function analyse(env, body) {
 async function tavilySearch(key, query, domains) {
   const payload = {
     api_key: key, query, search_depth: "basic", topic: "general",
-    max_results: 8, include_answer: false, include_raw_content: false
+    max_results: 15, include_answer: false, include_raw_content: false
   };
   if (domains && domains.length) payload.include_domains = domains;
   const response = await fetch("https://api.tavily.com/search", {
@@ -221,7 +221,7 @@ function hasIsraelEvidence(job) {
 async function selectTopJobs(env, candidates, preferences) {
   if (!candidates.length) return [];
 
-  const shortlist = candidates.slice(0, 30).map((job, index) => ({
+  const shortlist = candidates.slice(0, 60).map((job, index) => ({
     index,
     title: job.title,
     source: job.source,
@@ -240,7 +240,7 @@ async function selectTopJobs(env, candidates, preferences) {
     "Use only supplied facts. Do not invent requirements. Missing details are unknown, not automatic disqualifiers.",
     "Your entire answer MUST be exactly one JSON object in this exact format:",
     '{"selected":[{"index":0,"matchReason":"Relevant junior role with matching duties","matchScore":85}]}',
-    "The selected value MUST be an array. Each index MUST be copied from an input record. Select up to 10 strongest matches, best first. Return no markdown, no explanation and no other keys."
+    "The selected value MUST be an array. Each index MUST be copied from an input record. Select up to 15 strongest matches, best first. Return no markdown, no explanation and no other keys."
   ].join(" ");
 
   let parsed = null;
@@ -261,7 +261,7 @@ async function selectTopJobs(env, candidates, preferences) {
         "If there are plausible matches, select them. Never make up an index."
       ].join("\n");
 
-      const raw = await askAI(env, system, prompt, attempt === 0 ? 1500 : 1200);
+      const raw = await askAI(env, system, prompt, attempt === 0 ? 2600 : 1800);
       parsed = extractJSON(raw);
 
       // Accept common array-key variations from models, but always validate
@@ -290,7 +290,7 @@ async function selectTopJobs(env, candidates, preferences) {
   }
 
   const used = new Set();
-  const selected = parsed.selected.slice(0, 30).map(item => {
+  const selected = parsed.selected.slice(0, 60).map(item => {
     const rawIndex = item && (item.index ?? item.candidateIndex ?? item.candidate_index);
     const index = Number(rawIndex);
 
@@ -308,7 +308,7 @@ async function selectTopJobs(env, candidates, preferences) {
   }).filter(Boolean)
     .filter(job => !isSearchOrProfilePage(job))
     .filter(job => hasIsraelEvidence(job))
-    .slice(0, 10);
+    .slice(0, 15);
 
   if (!selected.length) {
     throw new Error("AI review found no direct individual vacancies with clear evidence of an Israel-based role. Search results and profiles were excluded.");
@@ -338,11 +338,11 @@ async function search(env, body) {
       "Work arrangement: " + (workMode || "any"),
       "CV: " + (cv || "not supplied"),
       "Already suggested roles: " + selectedRoles.join("; "),
-      "Generate up to 3 concise queries using realistic job titles, synonyms and transferable skills. Include the location and experience/work arrangement only when provided. Avoid generic advice. Suggest up to 5 adjacent job titles if a CV is supplied."
+      "Generate 5 to 6 distinct, concise queries using realistic job titles, synonyms and transferable skills. Vary the job-title wording to discover different individual vacancies, not just the same search results. Include the location and experience/work arrangement only when provided. Avoid generic advice. Suggest up to 5 adjacent job titles if a CV is supplied."
     ].join("\n");
     const raw = await askAI(env, "You are a job-search query planner. Never invent jobs or employers. Output valid JSON only.", prompt, 1100);
     const planned = extractJSON(raw);
-    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 4).map(x => clean(x, 220)).filter(Boolean) : [];
+    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 6).map(x => clean(x, 220)).filter(Boolean) : [];
     suggestions = Array.isArray(planned.careerSuggestions) ? planned.careerSuggestions.slice(0, 5).map(x => ({
       title: clean(x.title, 100), reason: clean(x.reason, 260), searchTerms: clean(x.searchTerms || x.title, 150)
     })).filter(x => x.title) : [];
@@ -362,12 +362,19 @@ async function search(env, body) {
     ["himalayas.app", "weworkremotely.com", "remote.co", "workingnomads.com", "jobspresso.co"]
   ];
   const tasks = [];
-  for (let i = 0; i < Math.min(queries.length, 3); i++) {
+  for (let i = 0; i < Math.min(queries.length, 6); i++) {
     const phrase = queries[i] + place + mode + exp + " jobs vacancies";
     const domains = boardGroups[i % boardGroups.length];
     tasks.push(tavilySearch(env.TAVILY_API_KEY, phrase, domains));
   }
+  // Add a second broad search using the candidate's other role terms to widen discovery.
+  const secondaryTerm = baseTerms[1] || selectedRoles[0] || suggestions[0]?.title || q || "suitable jobs";
   tasks.push(tavilySearch(env.TAVILY_API_KEY, (baseTerms[0] || q || "suitable jobs") + place + mode + exp + " jobs careers vacancies", []));
+  if (secondaryTerm && secondaryTerm.toLowerCase() !== (baseTerms[0] || q || "").toLowerCase()) {
+    tasks.push(tavilySearch(env.TAVILY_API_KEY, secondaryTerm + place + mode + exp + " jobs vacancies", [
+      "lever.co", "greenhouse.io", "ashbyhq.com", "smartrecruiters.com", "workable.com"
+    ]));
+  }
   const settled = await Promise.allSettled(tasks);
   const sources = settled.map((item, index) => ({ name: index === tasks.length - 1 ? "Wider web search" : "Job-board group " + (index + 1), status: item.status === "fulfilled" ? "connected" : "unavailable" }));
   const all = settled.flatMap(item => item.status === "fulfilled" ? item.value : []);
@@ -393,7 +400,7 @@ async function search(env, body) {
     .filter(item => isIndividualVacancyURL(item))
     .filter(item => hasIsraelEvidence(item))
     .sort((a, b) => b.score - a.score)
-    .slice(0, 32);
+    .slice(0, 60);
   let jobs;
   try {
     jobs = await selectTopJobs(env, candidates, {
