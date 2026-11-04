@@ -157,6 +157,9 @@ function isSearchOrProfilePage(job) {
   if (/linkedin\.com\/(in|pub)\//.test(url)) return true;
   if (/linkedin\.com\/jobs\/(?!view\/)/.test(url)) return true;
   if (/indeed\.com\/(q-|jobs\/|companies\/)/.test(url)) return true;
+  // Glassdoor's /Job/<location>-<keyword>-jobs... URLs are search pages;
+  // individual vacancies use /job-listing/ or partner/jobListing.htm.
+  if (/glassdoor\.[a-z.]+\/job\//.test(url) && !/job-listing/.test(url)) return true;
   if (/builtin\.com\/jobs\/.*\/search/.test(url)) return true;
   if (/\/(search|job-search|jobs-search)(\/|\?|$)/.test(url)) return true;
   if (/\b(jobs? in israel|israel jobs|job search|search results|open roles|career advice|salary guide)\b/.test(title)) return true;
@@ -181,6 +184,10 @@ function isIndividualVacancyURL(job) {
   }
   if (host === "indeed.com" || host.endsWith(".indeed.com")) {
     return /^\/viewjob\/?$/.test(path) && Boolean(url.searchParams.get("jk"));
+  }
+  if (host === "glassdoor.com" || host.endsWith(".glassdoor.com")) {
+    return /^\/job-listing\//.test(path)
+      || (/^\/partner\/joblisting\.htm$/.test(path) && Boolean(url.searchParams.get("jl")));
   }
   if (host.endsWith("smartrecruiters.com")) {
     return path.split("/").filter(Boolean).length >= 2 && /\d{5,}/.test(path);
@@ -519,7 +526,9 @@ async function verifyVacancyStatus(job) {
 }
 
 async function verifyAndLimitJobs(jobs, limit = 15) {
-  const checks = await Promise.all(jobs.slice(0, 12).map(job => verifyVacancyStatus(job)));
+  // Search boards often rank directories and duplicate listings highly.
+  // Inspect a wider pool so the first dozen results do not decide the outcome.
+  const checks = await Promise.all(jobs.slice(0, 36).map(job => verifyVacancyStatus(job)));
   const results = [];
   const seen = new Set();
   for (let i = 0; i < checks.length; i++) {
@@ -602,6 +611,18 @@ async function search(env, body) {
     const domains = boardGroups[i % boardGroups.length];
     tasks.push(tavilySearch(env.TAVILY_API_KEY, phrase, domains));
   }
+  // Search the major boards for their individual vacancy URL formats.
+  // Their broad search/category pages are discovery sources only and are
+  // never returned to the user as a job.
+  const boardTerm = (baseTerms[0] || q || "office administrator") + place + mode + exp;
+  const boardSearches = [
+    { query: "site:linkedin.com/jobs/view " + boardTerm + " Israel vacancy", domains: ["linkedin.com"] },
+    { query: "site:glassdoor.com/job-listing " + boardTerm + " Israel vacancy", domains: ["glassdoor.com"] },
+    { query: "site:indeed.com/viewjob " + boardTerm + " Israel vacancy", domains: ["indeed.com"] }
+  ];
+  for (const board of boardSearches) {
+    tasks.push(tavilySearch(env.TAVILY_API_KEY, board.query, board.domains));
+  }
   // Add a second broad search using the candidate's other role terms to widen discovery.
   const secondaryTerm = baseTerms[1] || selectedRoles[0] || suggestions[0]?.title || q || "suitable jobs";
   tasks.push(tavilySearch(env.TAVILY_API_KEY, (baseTerms[0] || q || "suitable jobs") + place + mode + exp + " individual job vacancy employer career site", []));
@@ -646,13 +667,13 @@ async function search(env, body) {
   try {
     // Inspect the actual employer pages first. The AI must rank real vacancy
     // descriptions, not short search-engine snippets or directory pages.
-    pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 12), 12);
+    pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 80), 15);
     if (!pageCheckedCandidates.length) {
       return json({
         jobs: [],
         total: 0,
         candidatesReviewed: candidates.length,
-        pagesChecked: Math.min(candidates.length, 12),
+        pagesChecked: Math.min(candidates.length, 36),
         sources,
         generatedAt: new Date().toISOString(),
         profileSummary: "CareerFinder checked the employer pages but could not confirm enough individual vacancy descriptions. No generic job-search pages were shown."
