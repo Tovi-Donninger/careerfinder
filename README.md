@@ -4,7 +4,7 @@ A free, universal job-search and career-discovery workspace.
 
 ## Current prototype (0.1.0)
 
-- Search live listings from three free public feeds: Arbeitnow (five pages), Jobicy (up to 200 remote listings) and Remotive (cached to respect its low request frequency).\n- Cache feed responses in the browser to reduce repeated API calls.\n- Filter listings by keywords, location, experience level and work arrangement, then deduplicate by original listing URL.\n- Open pre-filled searches on LinkedIn, Indeed, Glassdoor and other job boards, plus targeted Google searches for employer vacancies hosted on Greenhouse, Lever, Ashby, Workable and SmartRecruiters. These external searches are not imported into CareerFinder.
+- Search live listings from Arbeitnow and Jobicy public feeds, plus optional employer boards using the Greenhouse Job Board API and Ashby's public Job Postings API.\n- Connect up to 15 Greenhouse board tokens and 15 Ashby board names in the search page; identifiers are stored in this browser only.\n- Cache feed responses in the browser for one hour to reduce repeat requests.\n- Filter listings by keywords, location, experience level and work arrangement, then deduplicate by canonical listing URL.\n- Open pre-filled searches on LinkedIn, Indeed, Glassdoor and other job boards, plus targeted Google searches for employer vacancies hosted on Greenhouse, Lever, Ashby, Workable and SmartRecruiters. These external searches are not imported into CareerFinder.
 - Paste CV/experience text or load a plain-text `.txt` CV.
 - Get transparent keyword-based career suggestions and save promising directions.
 - Track jobs, application links and statuses.
@@ -25,7 +25,7 @@ This is a static browser application. Open `index.html` directly, or serve the f
 
 This is an early prototype, not a production job-search service yet.
 
-- The three connected feeds do not cover the whole job market and are not a replacement for LinkedIn, Indeed or Glassdoor. Those platforms open in separate tabs using pre-filled searches; their individual vacancies are not imported or tracked automatically inside CareerFinder.\n- Employer ATS discovery uses Google search links. It does not crawl or continuously monitor every company career page.\n- Job-feed availability and browser CORS policies can change. Failed feeds are skipped; no vacancy is guaranteed to be current or still open. The user should verify each vacancy on the employer website.\n- Remotive requests are cached for six hours to reduce calls; other feeds are cached for one hour. Browser-local caching is per device/browser, not a central shared cache.
+- Job sources do not cover the whole job market and are not a replacement for LinkedIn, Indeed or Glassdoor. Those platforms open in separate tabs using pre-filled searches; their individual vacancies are not imported.\n- Greenhouse and Ashby connectors require the user to supply the employer's public board token/name. They do not discover every employer automatically.\n- Lever's public postings API does not support cross-origin requests from unrelated domains, so it is not imported directly by this static browser app.\n- Job-feed availability, API policies and browser CORS rules can change. Failed sources are skipped and counted; users should verify every vacancy on the employer website. A published listing is not proof that a vacancy is still accepting applications.\n- Browser-local caching is per device/browser, not a central shared cache.
 - Job-feed coverage, location fields, freshness and cross-border eligibility vary. Always confirm vacancies on the employer's own website.
 - CV matching is keyword-based, not an AI hiring prediction.
 - The first version accepts pasted text or `.txt` files; it does not extract PDF or Word files.
@@ -44,7 +44,7 @@ This is an early prototype, not a production job-search service yet.
 1. Secure authentication and per-user cloud storage.
 2. PDF and DOCX CV text extraction, with private/deletable documents.
 3. Stronger skills and transferable-career matching, with an explainable non-AI fallback.
-4. More permitted job sources, employer career feeds and user-submitted listings.
+4. More permitted job sources, employer career feeds and user-submitted listings, including a secure proxy for APIs that do not permit browser cross-origin requests.
 5. Deduplication, freshness checks, filters and international job eligibility.
 6. Application notes, reminders, export and cross-device sync.
 
