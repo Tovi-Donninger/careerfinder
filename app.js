@@ -17,6 +17,25 @@ function showExternalSearches(q,loc){
  const box=el("more-sources");
  if(box)box.innerHTML='<details class="external-search"><summary>More places to search <span>Optional links to other job websites</span></summary><p>These links open searches on the websites themselves. They are not vacancies imported or verified by CareerFinder.</p><div class="source-links">'+links.map(x=>'<a class="source-link" target="_blank" rel="noopener noreferrer" href="'+x[1]+'"><span>'+x[0]+' ↗</span></a>').join("")+'</div></details>';
 }
+let searchLoadingTimer=null;
+function showSearchLoading(){
+ const box=el("jobs");
+ box.className="search-loading";
+ box.setAttribute("aria-live","polite");
+ box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · LIVE SEARCH</span><h4>Finding your next opportunity</h4><p id="loading-stage">Understanding your search criteria…</p><div class="loading-track"><span></span></div><div class="loading-steps"><span class="active" data-step="0"><i>01</i> Understand</span><span data-step="1"><i>02</i> Discover</span><span data-step="2"><i>03</i> Review</span><span data-step="3"><i>04</i> Shortlist</span></div><small class="loading-footnote">Searching job sites and comparing individual vacancies against your preferences.</small></div>';
+ const stages=["Understanding your search criteria…","Expanding job titles and related opportunities…","Searching job boards and employer career pages…","Reviewing listings for relevance to your profile…","Selecting the strongest individual vacancies…"];
+ let stage=0;
+ if(searchLoadingTimer)clearInterval(searchLoadingTimer);
+ searchLoadingTimer=setInterval(()=>{
+  stage=Math.min(stage+1,stages.length-1);
+  const line=el("loading-stage");if(line)line.textContent=stages[stage];
+  const active=stage<2?stage:stage<4?2:3;
+  box.querySelectorAll("[data-step]").forEach(node=>{node.classList.toggle("active",Number(node.dataset.step)===active);node.classList.toggle("done",Number(node.dataset.step)<active)});
+ },2600);
+}
+function stopSearchLoading(){
+ if(searchLoadingTimer){clearInterval(searchLoadingTimer);searchLoadingTimer=null}
+}
 function showFallbackSearches(q,loc,message){
  const box=el("jobs");
  box.className="empty";
@@ -36,14 +55,14 @@ async function search(e){
  const roles=(data.roles||[]).slice(0,5);
  if(!q&&!loc&&!cv&&!roles.length){toast("Enter a job title, location or CV first.");return}
  searches++;stats();document.querySelectorAll(".ai-summary").forEach(x=>x.remove());const moreSources=el("more-sources");if(moreSources)moreSources.innerHTML="";
- el("jobs").className="empty";el("jobs").textContent="AI is analysing your preferences and searching job websites…";
+ showSearchLoading();
  el("result-count").textContent="AI search in progress";
  try{
   const response=await fetch("https://careerfinder-search.tovidonninger.workers.dev/api/search",{
    method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},
    body:JSON.stringify({query:q,location:loc,experience:level,workMode:mode,cv,roles})
   });
-  const payload=await response.json();
+  const payload=await response.json();stopSearchLoading();
   if(!response.ok)throw Error(payload.error||"Search service returned HTTP "+response.status);
   const rows=payload.jobs||[];
   const connected=(payload.sources||[]).filter(x=>x.status==="connected").length;
@@ -53,6 +72,7 @@ async function search(e){
   el("jobs").className="";
   el("jobs").innerHTML=rows.map((x,i)=>'<article class="job curated-job"><div class="job-main"><h4>'+esc(x.title)+'</h4><small>'+esc(x.company||x.source||"Job listing")+' · '+esc(x.location||"Location not stated")+'</small><p>'+esc(x.matchReason||"Selected by AI as a relevant match.")+'</p></div><div class="job-actions"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">View vacancy ↗</a></div></article>').join("");
  }catch(error){
+  stopSearchLoading();
   showFallbackSearches(q,loc,error.message||"CareerFinder could not complete the AI search.");
   el("result-count").textContent="AI search unavailable";
  }
