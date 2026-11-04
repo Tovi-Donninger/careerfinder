@@ -224,13 +224,13 @@ function hasIsraelEvidence(job) {
 async function selectTopJobs(env, candidates, preferences) {
   if (!candidates.length) return [];
 
-  const shortlist = candidates.slice(0, 80).map((job, index) => ({
+  const shortlist = candidates.slice(0, 60).map((job, index) => ({
     index,
     title: job.title,
     source: job.source,
     location: job.location || "",
     url: job.url,
-    description: (job.description || "").slice(0, 420)
+    description: (job.description || "").slice(0, 1100)
   }));
 
   const system = [
@@ -238,7 +238,9 @@ async function selectTopJobs(env, candidates, preferences) {
     "Review the supplied vacancy records against the candidate criteria.",
     "The target country is Israel unless the candidate criteria explicitly say otherwise.",
     "Only select jobs with evidence that the actual role is based in Israel or explicitly open to applicants in Israel. Do not treat the word Israel in a search query as proof of the job location.",
-    "Only select individual vacancy advertisements with a direct vacancy URL. Exclude search pages, job category pages, employer homepages, LinkedIn profiles, articles, advice pages and duplicates.",
+    "Only select individual vacancy advertisements with a direct vacancy URL. Exclude search pages, job category pages, employer homepages, LinkedIn profiles, articles, advice pages, job collections and duplicates.",
+    "The supplied description must contain evidence about this specific role. A title plus a generic list of other jobs is not enough. Reject records where the description is a directory, search result, category page, or unrelated page.",
+    "Do not infer job duties, location, seniority, language requirements or experience requirements from the title alone. If the supplied evidence is insufficient, reject the record.",
     "Never select a role based in another country merely because it is remote or mentions Israel in unrelated text.",
     "Use only supplied facts. Do not invent requirements. Missing details are unknown, not automatic disqualifiers.",
     "Your entire answer MUST be exactly one JSON object in this exact format:",
@@ -293,7 +295,7 @@ async function selectTopJobs(env, candidates, preferences) {
   }
 
   const used = new Set();
-  const selected = parsed.selected.slice(0, 80).map(item => {
+  const selected = parsed.selected.slice(0, 60).map(item => {
     const rawIndex = item && (item.index ?? item.candidateIndex ?? item.candidate_index);
     const index = Number(rawIndex);
 
@@ -311,7 +313,7 @@ async function selectTopJobs(env, candidates, preferences) {
   }).filter(Boolean)
     .filter(job => !isSearchOrProfilePage(job))
     .filter(job => hasIsraelEvidence(job))
-    .slice(0, 30);
+    .slice(0, 25);
 
   if (!selected.length) {
     throw new Error("AI review found no direct individual vacancies with clear evidence of an Israel-based role. Search results and profiles were excluded.");
@@ -320,7 +322,45 @@ async function selectTopJobs(env, candidates, preferences) {
   return selected;
 }
 
-async function inspectVacancyPage(targetUrl) {
+function normaliseTitle(value) {
+  return clean(value, 220).toLowerCase()
+    .replace(/&amp;/g, "and")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(word => word.length > 1 && !["the","and","for","with","job","vacancy","career"].includes(word));
+}
+
+function titleSimilarity(expected, actual) {
+  const a = normaliseTitle(expected);
+  const b = normaliseTitle(actual);
+  if (!a.length || !b.length) return 0;
+  const setB = new Set(b);
+  const overlap = a.filter(word => setB.has(word)).length;
+  return overlap / a.length;
+}
+
+function extractJobPosting(html) {
+  const found = [];
+  const scripts = html.match(/<script[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi) || [];
+  const visit = value => {
+    if (!value) return;
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (typeof value !== "object") return;
+    const type = value["@type"];
+    if ((Array.isArray(type) ? type : [type]).some(x => String(x || "").toLowerCase() === "jobposting")) found.push(value);
+    if (value["@graph"]) visit(value["@graph"]);
+    if (value.mainEntity) visit(value.mainEntity);
+    if (value.itemListElement) visit(value.itemListElement);
+  };
+  for (const script of scripts) {
+    const raw = script.replace(/^<script[^>]*>/i, "").replace(/<\/script>$/i, "");
+    try { visit(JSON.parse(raw)); } catch {}
+  }
+  return found;
+}
+
+async function inspectVacancyPage(targetUrl, expectedTitle) {
   const response = await fetch(targetUrl, {
     method: "GET",
     redirect: "follow",
@@ -328,17 +368,17 @@ async function inspectVacancyPage(targetUrl) {
       "User-Agent": "Mozilla/5.0 (compatible; CareerFinderJobVerifier/1.0)",
       "Accept": "text/html,application/xhtml+xml"
     },
-    signal: AbortSignal.timeout(9000)
+    signal: AbortSignal.timeout(7000)
   });
   if (response.status === 404 || response.status === 410) {
-    return { open: false, reason: "Vacancy page returned HTTP " + response.status };
+    return { open: false, individual: false, reason: "Vacancy page returned HTTP " + response.status };
   }
   if (!response.ok) {
-    return { open: null, reason: "Employer page could not be verified (HTTP " + response.status + ")" };
+    return { open: null, individual: false, reason: "Employer page could not be verified (HTTP " + response.status + ")" };
   }
 
-  const html = (await response.text()).slice(0, 250000);
-  const lower = html.toLowerCase();
+  const html = (await response.text()).slice(0, 300000);
+  const finalUrl = response.url || targetUrl;
   const titleMatch = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i) || html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
   const pageTitle = clean(titleMatch ? titleMatch[1].replace(/<[^>]*>/g, " ") : "", 180);
   const visible = clean(
@@ -348,7 +388,7 @@ async function inspectVacancyPage(targetUrl) {
       .replace(/&amp;/gi, "&")
       .replace(/&quot;/gi, '"')
       .replace(/&#39;|&apos;/gi, "'"),
-    12000
+    30000
   ).toLowerCase();
 
   const closedPatterns = [
@@ -363,35 +403,70 @@ async function inspectVacancyPage(targetUrl) {
     /position has been filled/
   ];
   if (closedPatterns.some(pattern => pattern.test(visible))) {
-    return { open: false, reason: "Employer page indicates applications are closed or the vacancy is filled" };
+    return { open: false, individual: false, reason: "Employer page indicates applications are closed or the vacancy is filled" };
   }
 
-  const structuredJob = /"@type"\s*:\s*"jobposting"/i.test(html);
-  const sectionSignals = [
-    /responsibilit|what you will do|what you'll do|your role|role overview/,
-    /requirement|qualification|what you bring|what you'll need|what you will need/,
-    /experience|skills|education|about the role|job description/
-  ].filter(pattern => pattern.test(visible)).length;
-  const listPage = /all (open )?(jobs|positions|vacancies)|browse (jobs|opportunities)|search (jobs|open positions)|job opportunities at|careers home/i.test(pageTitle + " " + visible.slice(0, 1200));
-  const applicationPage = /\/(apply|application|submit-application)\/?$/i.test(new URL(response.url || targetUrl).pathname)
-    || /application form|submit your application|candidate application/i.test(pageTitle);
+  const postings = extractJobPosting(html);
+  const structured = postings.length === 1 ? postings[0] : null;
+  const structuredTitle = structured ? clean(structured.title, 180) : "";
+  const heading = structuredTitle || pageTitle;
+  const similarity = titleSimilarity(expectedTitle, heading);
+  const pageUrl = new URL(finalUrl);
+  const path = pageUrl.pathname.toLowerCase();
 
+  const directorySignals = [
+    /all (open )?(jobs|positions|vacancies)/,
+    /browse (jobs|opportunities)/,
+    /search (jobs|open positions)/,
+    /job opportunities at/,
+    /careers home/,
+    /showing \d+[-–]\d+ of \d+/,
+    /\d+ jobs? found/,
+    /filter by (location|department|team|category)/,
+    /sort by (relevance|date|location)/
+  ];
+  const isDirectory = directorySignals.some(pattern => pattern.test(pageTitle.toLowerCase() + " " + visible.slice(0, 3500)));
+  const applicationOnly = /\/(apply|application|submit-application)\/?$/i.test(path)
+    || /application form|submit your application|candidate application/i.test(pageTitle);
+  const roleSignals = [
+    /responsibilit|what you will do|what you'll do|your role|role overview|day to day/,
+    /requirement|qualification|what you bring|what you'll need|what you will need/,
+    /experience|skills|education|about the role|job description|what we're looking for/
+  ].filter(pattern => pattern.test(visible)).length;
+  const titleMatchStrong = similarity >= 0.55;
+  const oneStructuredPosting = postings.length === 1 && titleSimilarity(expectedTitle, structuredTitle) >= 0.55;
+  const oneUnstructuredPosting = postings.length === 0 && titleMatchStrong && visible.length >= 900 && roleSignals >= 2;
+  const individual = !isDirectory && !applicationOnly && (oneStructuredPosting || oneUnstructuredPosting);
+
+  if (!individual) {
+    return {
+      open: true,
+      individual: false,
+      reason: isDirectory ? "The destination is a job directory or search-results page"
+        : applicationOnly ? "The destination is an application form"
+        : postings.length > 1 ? "The page contains multiple job postings"
+        : "The page does not clearly describe the advertised vacancy"
+    };
+  }
+
+  const structuredDescription = structured && structured.description
+    ? clean(structured.description, 2200)
+    : "";
+  const structuredLocation = structured && structured.jobLocation
+    ? clean(JSON.stringify(structured.jobLocation), 300)
+    : "";
   return {
     open: true,
-    url: response.url || targetUrl,
-    title: pageTitle,
-    description: visible.slice(0, 1800),
-    individual: !listPage && !applicationPage && (structuredJob || (visible.length >= 450 && sectionSignals >= 2)),
-    reason: listPage
-      ? "The destination appears to be a general job-listing page"
-      : applicationPage
-        ? "The destination appears to be an application form rather than a job description"
-        : "Employer page inspected"
+    individual: true,
+    url: finalUrl,
+    title: heading,
+    description: structuredDescription || visible.slice(0, 2200),
+    location: structuredLocation,
+    reason: "One individual vacancy description was identified and matched to the search result"
   };
 }
 
 async function verifyVacancyStatus(job) {
-  // Prefer the vacancy description over a direct application form.
   const urls = [job.url];
   try {
     const original = new URL(job.url);
@@ -401,45 +476,40 @@ async function verifyVacancyStatus(job) {
     }
   } catch {}
 
-  let lastResult = { open: null, individual: false, reason: "Could not verify employer page" };
   for (const url of [...new Set(urls)]) {
     try {
-      const result = await inspectVacancyPage(url);
+      const result = await inspectVacancyPage(url, job.title);
       if (result.open === false) return result;
       if (result.individual) return result;
-      lastResult = result;
-    } catch (error) {
-      lastResult = { open: null, individual: false, reason: "Could not verify employer page" };
-    }
+    } catch {}
   }
-  return lastResult;
+  return { open: null, individual: false, reason: "Could not confirm an individual vacancy description" };
 }
 
 async function verifyAndLimitJobs(jobs, limit = 15) {
+  const checks = await Promise.all(jobs.slice(0, 25).map(job => verifyVacancyStatus(job)));
   const results = [];
-  const seenVacancyUrls = new Set();
-  for (let i = 0; i < jobs.length && results.length < limit; i += 6) {
-    const batch = jobs.slice(i, i + 6);
-    const checks = await Promise.all(batch.map(job => verifyVacancyStatus(job)));
-    for (let j = 0; j < batch.length; j++) {
-      const check = checks[j];
-      // Do not show an unverified page, a general listings page, or an application-only URL.
-      if (check.open !== true || check.individual !== true || !check.url) continue;
-      const verifiedJob = {
-        ...batch[j],
-        url: check.url,
-        title: check.title && check.title.length > 3 ? check.title : batch[j].title,
-        description: check.description || batch[j].description,
-        availabilityStatus: "Employer vacancy description checked",
-        availabilityNote: "The destination contains an individual vacancy description; check the employer page for the latest application status."
-      };
-      if (!isIndividualVacancyURL(verifiedJob) || !hasIsraelEvidence(verifiedJob)) continue;
-      const finalKey = verifiedJob.url.replace(/\/$/, "").toLowerCase();
-      if (seenVacancyUrls.has(finalKey)) continue;
-      seenVacancyUrls.add(finalKey);
-      results.push(verifiedJob);
-      if (results.length >= limit) break;
-    }
+  const seen = new Set();
+  for (let i = 0; i < checks.length; i++) {
+    const check = checks[i];
+    if (check.open !== true || check.individual !== true || !check.url) continue;
+    const original = jobs[i];
+    const verifiedJob = {
+      ...original,
+      url: check.url,
+      title: check.title || original.title,
+      description: check.description || original.description,
+      location: check.location || original.location,
+      availabilityStatus: "Individual vacancy page checked",
+      availabilityNote: "CareerFinder identified a single vacancy description. Confirm application availability on the employer's page."
+    };
+    if (!isIndividualVacancyURL(verifiedJob)) continue;
+    if (!hasIsraelEvidence(verifiedJob)) continue;
+    const key = verifiedJob.url.replace(/\/$/, "").toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push(verifiedJob);
+    if (results.length >= limit) break;
   }
   return results;
 }
@@ -466,7 +536,7 @@ async function search(env, body) {
       "Work arrangement: " + (workMode || "any"),
       "CV: " + (cv || "not supplied"),
       "Already suggested roles: " + selectedRoles.join("; "),
-      "Generate 8 distinct, concise queries using realistic job titles, synonyms and transferable skills. Vary the job-title wording to discover different individual vacancies, not just the same search results. Include the location and experience/work arrangement only when provided. Avoid generic advice. Suggest up to 5 adjacent job titles if a CV is supplied."
+      "Generate 6 distinct, concise queries using realistic job titles, synonyms and transferable skills. Each query should target a different role family and individual vacancy advertisements. Avoid generic job lists, career advice and salary pages. Include the location and experience/work arrangement only when provided. Suggest up to 5 adjacent job titles if a CV is supplied."
     ].join("\n");
     const raw = await askAI(env, "You are a job-search query planner. Never invent jobs or employers. Output valid JSON only.", prompt, 1100);
     const planned = extractJSON(raw);
@@ -495,14 +565,14 @@ async function search(env, body) {
     ["jobylon.com", "comeet.com", "breezy.hr", "workable.com", "ashbyhq.com"]
   ];
   const tasks = [];
-  for (let i = 0; i < Math.min(queries.length, 8); i++) {
+  for (let i = 0; i < Math.min(queries.length, 6); i++) {
     const phrase = queries[i] + place + mode + exp + " jobs vacancies";
     const domains = boardGroups[i % boardGroups.length];
     tasks.push(tavilySearch(env.TAVILY_API_KEY, phrase, domains));
   }
   // Add a second broad search using the candidate's other role terms to widen discovery.
   const secondaryTerm = baseTerms[1] || selectedRoles[0] || suggestions[0]?.title || q || "suitable jobs";
-  tasks.push(tavilySearch(env.TAVILY_API_KEY, (baseTerms[0] || q || "suitable jobs") + place + mode + exp + " jobs careers vacancies", []));
+  tasks.push(tavilySearch(env.TAVILY_API_KEY, (baseTerms[0] || q || "suitable jobs") + place + mode + exp + " individual job vacancy employer career site", []));
   if (secondaryTerm && secondaryTerm.toLowerCase() !== (baseTerms[0] || q || "").toLowerCase()) {
     tasks.push(tavilySearch(env.TAVILY_API_KEY, secondaryTerm + place + mode + exp + " jobs vacancies", [
       "lever.co", "greenhouse.io", "ashbyhq.com", "smartrecruiters.com", "workable.com"
