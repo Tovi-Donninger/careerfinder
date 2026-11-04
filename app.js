@@ -89,7 +89,14 @@ async function search(e){
   const connected=(payload.sources||[]).filter(x=>x.status==="connected").length;
   el("result-count").textContent=rows.length+" AI-selected matches from "+(payload.candidatesReviewed||0)+" reviewed listings";
   if(payload.profileSummary)el("jobs").insertAdjacentHTML("beforebegin",'<p class="ai-summary">'+esc(payload.profileSummary)+'</p>');
-  if(!rows.length){showFallbackSearches(q,loc,"The AI search ran but did not find indexed vacancies for these criteria. Try broader keywords or another location.");return}
+  if(!rows.length){
+   const d=payload.searchDiagnostics||{};
+   const diagnosticText=d.searchResultsReturned!==undefined
+    ? "Search results: "+d.searchResultsReturned+" · Unique pages: "+d.uniqueResults+" · After page filters: "+d.afterSearchPageAndProfileFilter+" · Direct vacancy links: "+d.afterDirectVacancyUrlFilter+" · Employer pages checked: "+d.candidatePagesSelectedForChecking+" · Verified vacancies: "+d.verifiedIndividualVacancies+"."
+    : "The search provider did not return diagnostic counts.";
+   showFallbackSearches(q,loc,"CareerFinder found results but could not pass them through its vacancy checks. "+diagnosticText+" This helps identify whether the problem is search discovery, URL filtering or employer-page verification.");
+   return
+  }
   el("jobs").className="";
   el("jobs").innerHTML=rows.map((x,i)=>'<article class="job curated-job"><div class="job-main"><h4>'+esc(x.title)+'</h4><small>'+esc(x.company||x.source||"Job listing")+' · '+esc(x.location||"Location not stated")+'</small>'+(x.availabilityStatus?'<div class="job-meta"><span>'+esc(x.availabilityStatus)+'</span></div>':'')+(x.description?'<p class="job-description">'+esc(String(x.description).slice(0,280))+'</p>':'')+'<p class="match-reason">'+esc(x.matchReason||"Selected by AI as a relevant match.")+'</p></div><div class="job-actions"><a href="'+esc(x.url)+'" target="_blank" rel="noopener noreferrer">View vacancy ↗</a></div></article>').join("");
  }catch(error){
