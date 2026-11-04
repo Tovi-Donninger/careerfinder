@@ -101,43 +101,79 @@ function fallbackTopJobs(candidates, preferences) {
 
 async function selectTopJobs(env, candidates, preferences) {
   if (!candidates.length) return [];
+
   const shortlist = candidates.slice(0, 30).map((job, index) => ({
-    index, title: job.title, source: job.source, location: job.location || "",
-    url: job.url, description: (job.description || "").slice(0, 520)
+    index,
+    title: job.title,
+    source: job.source,
+    location: job.location || "",
+    url: job.url,
+    description: (job.description || "").slice(0, 520)
   }));
-  const system = "You are a careful recruitment shortlist reviewer. Compare vacancies with the candidate criteria, including job-title fit, location, experience level, work arrangement, transferable skills and explicit language requirements. Use only supplied information; never invent requirements or qualifications. Exclude search pages, homepages, articles, advice pages and obvious duplicates. Prefer direct individual vacancy pages. Do not reject a vacancy only because a detail is missing from the snippet; note uncertainty in the reason. Return exactly one valid JSON object and nothing else: {\\"selected\\":[{\\"index\\":0,\\"matchReason\\":\\"Why it fits\\",\\"matchScore\\":80}]}. Select up to 10 strongest relevant individual vacancies, ordered best first. Use only indexes from input. If plausible matches exist, do not return an empty list. Keep each reason under 18 words.";
+
+  const system = [
+    "You are a careful recruitment shortlist reviewer.",
+    "Compare each vacancy with the candidate criteria: job-title fit, location, experience level, work arrangement, transferable skills and explicit language requirements.",
+    "Use only supplied information. Never invent requirements or qualifications.",
+    "Exclude search pages, homepages, articles, advice pages and obvious duplicates. Prefer direct individual vacancy pages.",
+    "Do not reject a vacancy only because a detail is missing from the snippet; note uncertainty in the reason.",
+    "Return one valid JSON object with a selected array. Each selected item must contain index, matchReason and matchScore.",
+    "Select up to 10 strongest relevant individual vacancies, ordered best first. Use only indexes from the input. If plausible matches exist, do not return an empty list.",
+    "Keep each matchReason under 18 words. Return JSON only, with no markdown."
+  ].join(" ");
+
   let parsed = null;
   let lastError = null;
+
   for (const attempt of [0, 1]) {
     try {
-      const items = attempt === 0 ? shortlist : shortlist.map(({ index, title, source, location }) => ({ index, title, source, location }));
-      const prompt = "Candidate criteria: " + JSON.stringify(preferences) + "\\nVacancy results: " + JSON.stringify(items) + "\\nReturn ONLY valid JSON with selected array. Each item must have index, matchReason and matchScore. Maximum 10.";
+      const items = attempt === 0
+        ? shortlist
+        : shortlist.map(({ index, title, source, location }) => ({ index, title, source, location }));
+
+      const prompt = [
+        "Candidate criteria: " + JSON.stringify(preferences),
+        "Vacancy results: " + JSON.stringify(items),
+        "Return ONLY valid JSON with a selected array. Each item must have index, matchReason and matchScore. Maximum 10."
+      ].join("\n");
+
       const raw = await askAI(env, system, prompt, attempt === 0 ? 1400 : 1100);
       parsed = extractJSON(raw);
-      if (!Array.isArray(parsed.selected)) throw new Error("AI response did not contain a selected list.");
+      if (!Array.isArray(parsed.selected)) {
+        throw new Error("AI response did not contain a selected list.");
+      }
       break;
     } catch (error) {
       lastError = error;
       parsed = null;
     }
   }
+
   if (!parsed || !Array.isArray(parsed.selected)) {
     throw new Error("AI vacancy review failed: " + clean(lastError?.message || "The AI returned an invalid response.", 220));
   }
+
   const used = new Set();
   const selected = parsed.selected.slice(0, 10).map(item => {
     const index = Number(item.index);
-    if (!Number.isInteger(index) || index < 0 || index >= shortlist.length || used.has(index)) return null;
+
+    if (!Number.isInteger(index) || index < 0 || index >= shortlist.length || used.has(index)) {
+      return null;
+    }
+
     used.add(index);
+
     return {
       ...candidates[index],
       matchReason: clean(item.matchReason || "Selected based on the supplied job details.", 220),
       matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 50)))
     };
   }).filter(Boolean);
+
   if (!selected.length) {
     throw new Error("AI vacancy review returned no valid individual vacancies. Search results were not shown as an AI shortlist.");
   }
+
   return selected;
 }
 async function search(env, body) {
