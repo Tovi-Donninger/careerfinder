@@ -2,26 +2,26 @@ const KEY="careerfinder-v1";let data;try{data=JSON.parse(localStorage.getItem(KE
 function showExternalSearches(q,loc){
  const mode=el("work-mode")?el("work-mode").value:"any";
  const suffix=mode==="remote"?" remote":mode==="hybrid"?" hybrid":mode==="onsite"?" on-site":"";
- const term=q+suffix;
- const encoded=encodeURIComponent([term,loc].filter(Boolean).join(" "));
+ const term=(q||"jobs")+suffix;
+ const encoded=encodeURIComponent(term);
+ const place=encodeURIComponent(loc||"");
+ const combined=encodeURIComponent([term,loc].filter(Boolean).join(" "));
  const links=[
-  ["LinkedIn Jobs","https://www.linkedin.com/jobs/search/?keywords="+encodeURIComponent(term)+"&location="+encodeURIComponent(loc)],
-  ["Indeed","https://www.indeed.com/jobs?q="+encodeURIComponent(term)+"&l="+encodeURIComponent(loc)],
-  ["Glassdoor","https://www.glassdoor.com/Job/jobs.htm?sc.keyword="+encodeURIComponent(term)+"&locName="+encodeURIComponent(loc)],
-  ["Facebook groups & posts","https://www.facebook.com/search/posts/?q="+encoded],
-  ["We Work Remotely","https://weworkremotely.com/remote-jobs/search?term="+encodeURIComponent(q)],
-  ["Remote OK","https://remoteok.com/remote-"+encodeURIComponent(q.toLowerCase().replace(/\s+/g,"-"))+"-jobs"],
-  ["Himalayas","https://himalayas.app/jobs?search="+encodeURIComponent(q)],
-  ["Wellfound","https://wellfound.com/role/r/"+encodeURIComponent(q.toLowerCase().replace(/\s+/g,"-"))],
-  ["Working Nomads","https://www.workingnomads.com/jobs?search="+encodeURIComponent(q)],
-  ["FlexJobs (subscription)","https://www.flexjobs.com/search?search="+encodeURIComponent(q)],
-  ["Remote.co","https://remote.co/remote-jobs/"],
-  ["JustRemote","https://justremote.co/remote-jobs"],
-  ["Jobspresso","https://jobspresso.co/"],
-  ["Arc","https://arc.dev/remote-jobs"]
+  ["LinkedIn Jobs","https://www.linkedin.com/jobs/search/?keywords="+encoded+"&location="+place,"Search jobs"],
+  ["Indeed","https://www.indeed.com/jobs?q="+encoded+"&l="+place,"Search jobs"],
+  ["Glassdoor","https://www.glassdoor.com/Job/jobs.htm?sc.keyword="+encoded+"&locName="+place,"Search jobs"],
+  ["Himalayas","https://himalayas.app/jobs?search="+encoded,"Search jobs"],
+  ["Wellfound","https://wellfound.com/jobs?query="+encoded,"Search jobs"],
+  ["We Work Remotely","https://weworkremotely.com/remote-jobs/search?term="+encoded,"Search remote jobs"],
+  ["Working Nomads","https://www.workingnomads.com/jobs?search="+encoded,"Search jobs"],
+  ["Jobspresso","https://jobspresso.co/?s="+encoded,"Search jobs"],
+  ["Remote.co","https://remote.co/remote-jobs/","Browse remote jobs"],
+  ["JustRemote","https://justremote.co/remote-jobs","Browse remote jobs"],
+  ["Facebook job posts","https://www.facebook.com/search/posts/?q="+combined,"Search public posts"],
+  ["Google company career pages","https://www.google.com/search?q="+encodeURIComponent(term+" "+(loc||"")+" careers jobs"),"Find employer vacancies"]
  ];
  const box=el("more-sources");
- if(box)box.innerHTML='<h4>Search across job websites</h4><p>These links open each platform. Some may require an account or paid membership. Check country eligibility and listing availability.</p><div class="source-links">'+links.map(x=>'<a target="_blank" rel="noopener" href="'+x[1]+'">'+x[0]+' ↗</a>').join("")+'</div>';
+ if(box)box.innerHTML='<div class="sources-heading"><div><h4>Search on other free job sites</h4><p>These open a pre-filled search on each site. Basic job searching is free; some platforms may offer optional paid extras. CareerFinder does not charge you or require a paid job-board subscription.</p></div><span class="free-tag">FREE TO SEARCH</span></div><div class="source-links">'+links.map(x=>'<a class="source-link" target="_blank" rel="noopener noreferrer" href="'+x[1]+'"><span>'+x[0]+'</span><small>'+x[2]+' ↗</small></a>').join("")+'</div>';
 }
 function showFallbackSearches(q,loc,message){
  const box=el("jobs");
