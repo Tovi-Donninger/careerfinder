@@ -104,3 +104,6 @@
 .cv-loading .loading-track{height:7px;width:100%;max-width:520px;background:#e6eddf;border-radius:10px;overflow:hidden}
 .cv-loading .loading-track span{display:block;width:10%;height:100%;border-radius:10px;background:linear-gradient(90deg,#91b96d,#c8f36d);transition:width .7s ease}
 @media(max-width:600px){.cv-loading{padding:23px 18px;gap:17px;align-items:flex-start;flex-direction:column}}
+
+.job-main .job-description{font-size:11px;line-height:1.55;color:#526359;margin:9px 0 0;max-width:760px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.job-main .match-reason{font-size:11px;line-height:1.5;color:#7b887e;margin:7px 0 0}
