@@ -487,7 +487,7 @@ async function verifyVacancyStatus(job) {
 }
 
 async function verifyAndLimitJobs(jobs, limit = 15) {
-  const checks = await Promise.all(jobs.slice(0, 25).map(job => verifyVacancyStatus(job)));
+  const checks = await Promise.all(jobs.slice(0, 35).map(job => verifyVacancyStatus(job)));
   const results = [];
   const seen = new Set();
   for (let i = 0; i < checks.length; i++) {
@@ -606,10 +606,24 @@ async function search(env, body) {
     .slice(0, 80);
   let jobs;
   try {
-    const aiRankedJobs = await selectTopJobs(env, candidates, {
+    // Inspect the actual employer pages first. The AI must rank real vacancy
+    // descriptions, not short search-engine snippets or directory pages.
+    const pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 35), 35);
+    if (!pageCheckedCandidates.length) {
+      return json({
+        jobs: [],
+        total: 0,
+        candidatesReviewed: candidates.length,
+        pagesChecked: Math.min(candidates.length, 35),
+        sources,
+        generatedAt: new Date().toISOString(),
+        profileSummary: "CareerFinder checked the employer pages but could not confirm enough individual vacancy descriptions. No generic job-search pages were shown."
+      });
+    }
+    const aiRankedJobs = await selectTopJobs(env, pageCheckedCandidates, {
       query: q, location, experience, workMode, cv: cv.slice(0, 3500), savedCareerRoles: selectedRoles
     });
-    jobs = await verifyAndLimitJobs(aiRankedJobs, 15);
+    jobs = aiRankedJobs.slice(0, 15);
   } catch (error) {
     return json({ error: "Search results were found, but the vacancy review could not be completed. " + clean(error.message, 180) }, 502);
   }
