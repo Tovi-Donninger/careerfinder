@@ -50,14 +50,15 @@ async function analyse(env, body) {
   }
 }
 async function tavilySearch(key, query, domains) {
+  const payload = {
+    api_key: key, query, search_depth: "basic", topic: "general",
+    max_results: 8, include_answer: false, include_raw_content: false
+  };
+  if (domains && domains.length) payload.include_domains = domains;
   const response = await fetch("https://api.tavily.com/search", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: key, query, search_depth: "basic", topic: "general",
-      max_results: 8, include_answer: false, include_raw_content: false,
-      include_domains: domains
-    })
+    body: JSON.stringify(payload)
   });
   if (!response.ok) throw new Error("Job search provider returned HTTP " + response.status);
   const data = await response.json();
@@ -130,7 +131,10 @@ async function search(env, body) {
   const seen = new Set();
   const jobs = all.filter(item => {
     try {
-      const url = new URL(item.url); url.hash = ""; url.search = "";
+      const url = new URL(item.url); url.hash = "";
+      for (const param of [...url.searchParams.keys()]) {
+        if (/^(utm_|gclid$|fbclid$|ref$)/i.test(param)) url.searchParams.delete(param);
+      }
       const key = url.href.replace(/\/$/, "").toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key); item.url = url.href; return true;
