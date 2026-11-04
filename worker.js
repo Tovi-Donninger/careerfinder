@@ -12,10 +12,60 @@ function clean(value, max = 12000) {
   return String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
 }
 function extractJSON(value) {
-  const text = String(value || "").replace(/^﻿/, "").trim();
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("The AI returned an unexpected response.");
-  return JSON.parse(match[0]);
+  const text = String(value || "").replace(/^\uFEFF/, "").trim();
+  if (!text) throw new Error("The AI returned an empty response.");
+
+  // First try parsing the complete response, including optional markdown fences.
+  const unfenced = text
+    .replace(/^\s*```(?:json)?\s*/i, "")
+    .replace(/\s*```\s*$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(unfenced);
+  } catch (firstError) {
+    // Some model responses include commentary or trailing text. Extract the
+    // first balanced JSON object while respecting quoted strings and escapes.
+    const start = unfenced.indexOf("{");
+    if (start < 0) throw new Error("The AI response did not contain a JSON object.");
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let i = start; i < unfenced.length; i++) {
+      const char = unfenced[i];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"') {
+        inString = true;
+      } else if (char === "{") {
+        depth++;
+      } else if (char === "}") {
+        depth--;
+        if (depth === 0) {
+          const candidate = unfenced.slice(start, i + 1);
+          try {
+            return JSON.parse(candidate);
+          } catch (error) {
+            throw new Error("The AI returned malformed JSON: " + clean(error.message, 160));
+          }
+        }
+      }
+    }
+
+    throw new Error("The AI returned an incomplete JSON object.");
+  }
 }
 async function askAI(env, system, user, maxTokens = 1200) {
   if (!env.AI) throw new Error("Cloudflare Workers AI is not connected. Add the AI binding to this Worker.");
