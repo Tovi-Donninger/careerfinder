@@ -197,7 +197,7 @@ function isIndividualVacancyURL(job) {
   if (host === "workable.com" || host.endsWith(".workable.com")) {
     return path.includes("/j/") || path.includes("/jobs/");
   }
-  if (/(^|\\.)((jobvite|icims|personio|bamboohr|recruitee|teamtailor|workday|myworkdayjobs|oraclecloud|successfactors|ultipro|jobylon|comeet|breezy)\\.com|breezy\\.hr)$/.test(host)) {
+  if (/(^|\.)((jobvite|icims|personio|bamboohr|recruitee|teamtailor|workday|myworkdayjobs|oraclecloud|successfactors|ultipro|jobylon|comeet|breezy)\.com|breezy\.hr)$/.test(host)) {
     return path.split("/").filter(Boolean).length >= 2 && !/\\/(search|careers|jobs)\\/?$/.test(path);
   }
   if (host === "facebook.com" || host.endsWith(".facebook.com")) {
