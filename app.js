@@ -22,16 +22,20 @@ function showSearchLoading(){
  const box=el("jobs");
  box.className="search-loading";
  box.setAttribute("aria-live","polite");
- box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · LIVE SEARCH</span><h4>Finding your next opportunity</h4><p id="loading-stage">Understanding your search criteria…</p><div class="loading-track"><span></span></div><div class="loading-steps"><span class="active" data-step="0"><i>01</i> Understand</span><span data-step="1"><i>02</i> Discover</span><span data-step="2"><i>03</i> Review</span><span data-step="3"><i>04</i> Shortlist</span></div><small class="loading-footnote">Searching job sites and comparing individual vacancies against your preferences.</small></div>';
- const stages=["Understanding your search criteria…","Expanding job titles and related opportunities…","Searching job boards and employer career pages…","Reviewing listings for relevance to your profile…","Selecting the strongest individual vacancies…"];
+ box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · LIVE SEARCH</span><h4>Finding your next opportunity</h4><p id="loading-stage">Understanding your search criteria…</p><div class="loading-track" role="progressbar" aria-label="Search progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"><span id="loading-progress"></span></div><div class="loading-steps"><span class="active" data-step="0"><i>01</i> Understand</span><span data-step="1"><i>02</i> Discover</span><span data-step="2"><i>03</i> Review</span><span data-step="3"><i>04</i> Shortlist</span></div><small class="loading-footnote">Searching job sites and comparing individual vacancies against your preferences. Progress updates as each phase is expected to run; results appear when the server responds.</small></div>';
+ const stages=[{label:"Understanding your search criteria…",progress:12},{label:"Expanding job titles and related opportunities…",progress:28},{label:"Searching job boards and employer career pages…",progress:48},{label:"Reviewing individual listings against your requirements…",progress:70},{label:"Selecting and preparing your strongest matches…",progress:88}];
  let stage=0;
- if(searchLoadingTimer)clearInterval(searchLoadingTimer);
- searchLoadingTimer=setInterval(()=>{
-  stage=Math.min(stage+1,stages.length-1);
-  const line=el("loading-stage");if(line)line.textContent=stages[stage];
+ const update=()=>{
+  const line=el("loading-stage"),bar=el("loading-progress"),track=box.querySelector('[role="progressbar"]');
+  if(line)line.textContent=stages[stage].label;
+  if(bar)bar.style.width=stages[stage].progress+"%";
+  if(track)track.setAttribute("aria-valuenow",String(stages[stage].progress));
   const active=stage<2?stage:stage<4?2:3;
   box.querySelectorAll("[data-step]").forEach(node=>{node.classList.toggle("active",Number(node.dataset.step)===active);node.classList.toggle("done",Number(node.dataset.step)<active)});
- },2600);
+ };
+ update();
+ if(searchLoadingTimer)clearInterval(searchLoadingTimer);
+ searchLoadingTimer=setInterval(()=>{if(stage<stages.length-1){stage++;update();}},3800);
 }
 function stopSearchLoading(){
  if(searchLoadingTimer){clearInterval(searchLoadingTimer);searchLoadingTimer=null}
