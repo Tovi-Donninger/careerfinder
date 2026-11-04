@@ -218,7 +218,8 @@ function hasIsraelEvidence(job) {
     job.url || ""
   ].join(" ").toLowerCase();
 
-  return /\b(israel|israeli|tel aviv|herzliya|ra'anana|raanana|jerusalem|haifa|netanya|beer sheva|beersheba|petah tikva|rishon lezion|ashdod|modiin|lod|holon|ramat gan|bnei brak|kfar saba|kfar-saba)\b/.test(evidence);
+  const israeliStructuredAddress = /"addressCountry"\s*:\s*"?IL"?/i.test(String(job.location || "")) || /"addressCountry"\s*:\s*"?IL"?/i.test(String(job.description || ""));
+  return israeliStructuredAddress || /\b(israel|israeli|tel aviv|herzliya|ra'anana|raanana|jerusalem|haifa|netanya|beer sheva|beersheba|petah tikva|rishon lezion|ashdod|modiin|lod|holon|ramat gan|bnei brak|kfar saba|kfar-saba)\b/.test(evidence);
 }
 
 async function selectTopJobs(env, candidates, preferences) {
@@ -540,7 +541,7 @@ async function search(env, body) {
     ].join("\n");
     const raw = await askAI(env, "You are a job-search query planner. Never invent jobs or employers. Output valid JSON only.", prompt, 1100);
     const planned = extractJSON(raw);
-    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 8).map(x => clean(x, 220)).filter(Boolean) : [];
+    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 6).map(x => clean(x, 220)).filter(Boolean) : [];
     suggestions = Array.isArray(planned.careerSuggestions) ? planned.careerSuggestions.slice(0, 5).map(x => ({
       title: clean(x.title, 100), reason: clean(x.reason, 260), searchTerms: clean(x.searchTerms || x.title, 150)
     })).filter(x => x.title) : [];
