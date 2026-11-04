@@ -59,39 +59,43 @@ async function search(e){
  e.preventDefault();
  const q=el("query").value.trim(),loc=el("location").value.trim(),level=el("experience").value;const mode=el("work-mode")?el("work-mode").value:"any";
  if(!q&&!loc){toast("Enter a job title or location.");return}
- searches++;stats();showExternalSearches(q,loc);el("jobs").textContent="Searching connected job sources…";el("result-count").textContent="Searching";
- const tasks=[
-  cachedFeed("arbeitnow-page-1","https://www.arbeitnow.com/api/job-board-api?page=1",3600000).then(async first=>{
-   const pages=[first,...await Promise.all([2,3,4,5].map(page=>cachedFeed("arbeitnow-page-"+page,"https://www.arbeitnow.com/api/job-board-api?page="+page,3600000)))];
-   return pages.flatMap(p=>Array.isArray(p.data)?p.data:[]).map(x=>({title:x.title,company:x.company_name,location:x.location,description:stripHtml(x.description),url:x.url,tags:x.tags||[],remote:!!x.remote,source:"Arbeitnow",sourceUrl:"https://www.arbeitnow.com/",updatedAt:x.created_at}));
-  }),
-  cachedFeed("jobicy","https://jobicy.com/api/jobs?count=200",3600000).then(j=>(j.jobs||[]).map(x=>({title:x.jobTitle||x.title,company:x.companyName||x.company,location:x.jobGeo||x.location||"Remote",description:stripHtml(x.jobDescription||x.description),url:x.url||x.jobUrl,tags:[...(x.jobIndustry||[]),...(x.jobType||[])],remote:true,source:"Jobicy",sourceUrl:"https://jobicy.com/",updatedAt:x.pubDate||x.date}))),
-  ...boardIds("greenhouse-boards").map(token=>greenhouseJobs(token)),
-  ...boardIds("ashby-boards").map(board=>ashbyJobs(board))
- ];
- const settled=await Promise.allSettled(tasks);
- const jobs=settled.flatMap(x=>x.status==="fulfilled"?x.value:[]);
- const sourceCount=settled.filter(x=>x.status==="fulfilled").length;
- const failedCount=settled.filter(x=>x.status==="rejected").length;
- const unique=[...new Map(jobs.filter(x=>x.url).map(x=>{try{const u=new URL(x.url);u.search="";u.hash="";return [u.href.replace(/\/$/,"").toLowerCase(),x]}catch{return [x.url,x]}})).values()];
+ searches++;stats();showExternalSearches(q,loc);el("jobs").textContent="Searching CareerFinder's connected job sources…";el("result-count").textContent="Searching";
+ const params=new URLSearchParams();
+ if(boardIds("greenhouse-boards").length)params.set("greenhouse",boardIds("greenhouse-boards").join(","));
+ if(boardIds("ashby-boards").length)params.set("ashby",boardIds("ashby-boards").join(","));
+ const endpoint="https://careerfinder-search.tovidonninger.workers.dev/api/jobs"+(params.toString()?"?"+params.toString():"");
+ let payload;
+ try{
+  const response=await fetch(endpoint,{headers:{"Accept":"application/json"}});
+  if(!response.ok)throw Error("Search service returned HTTP "+response.status);
+  payload=await response.json();
+ }catch(error){
+  showFallbackSearches(q,loc,"CareerFinder's search service could not be reached. Please try again shortly. "+error.message);
+  el("result-count").textContent="Search service unavailable";
+  return;
+ }
+ const unique=[...new Map((payload.jobs||[]).filter(x=>x.url).map(x=>{try{const u=new URL(x.url);u.search="";u.hash="";return [u.href.replace(/\/$/,"").toLowerCase(),x]}catch{return [x.url,x]}})).values()];
  const words=q.toLowerCase().split(/\s+/).filter(Boolean);
  const rows=unique.filter(x=>{
-  const text=[x.title,x.company,x.description,x.location,...x.tags].join(" ").replace(/<[^>]*>/g," ").toLowerCase();
+  const text=[x.title,x.company,x.description,x.location,...(x.tags||[])].join(" ").replace(/<[^>]*>/g," ").toLowerCase();
   const place=(x.location||"").toLowerCase();
   const locationOK=!loc||place.includes(loc.toLowerCase())||(loc.toLowerCase()==="remote"&&x.remote)||((/worldwide|anywhere|global|all countries/i.test(place))&&x.remote);
-  const arrangement=(()=>{const combined=(x.title+" "+x.description+" "+x.location).toLowerCase();if(/hybrid|partly remote|partially remote|2-3 days in office|days in the office/.test(combined))return "hybrid";if(x.remote||/remote|work from home|work-from-home|anywhere in the world/.test(combined))return "remote";return "onsite"})();
+  const combined=(x.title+" "+x.description+" "+x.location).toLowerCase();
+  const arrangement=/hybrid|partly remote|partially remote|2-3 days in office|days in the office/.test(combined)?"hybrid":(x.remote||/remote|work from home|work-from-home|anywhere in the world/.test(combined)?"remote":"onsite");
   const titleText=(x.title||"").toLowerCase(),tagText=(x.tags||[]).join(" ").toLowerCase();
   const matchedWords=words.filter(w=>text.includes(w)).length;
   const queryOK=!q||matchedWords>=Math.max(1,Math.ceil(words.length*0.5))||words.some(w=>titleText.includes(w))||words.some(w=>tagText.includes(w));
-  return queryOK&&locationOK&&(mode==="any"||arrangement===mode)&&experienceMatches({...x,category:x.tags.join(" ")},level);
+  return queryOK&&locationOK&&(mode==="any"||arrangement===mode)&&experienceMatches({...x,category:(x.tags||[]).join(" ")},level);
  });
- el("result-count").textContent=rows.length+" matching listings · "+sourceCount+" sources connected"+(failedCount?" · "+failedCount+" failed":"");
+ const connected=(payload.sources||[]).filter(x=>x.status==="connected").length;
+ const failed=(payload.sources||[]).filter(x=>x.status!=="connected").length;
+ el("result-count").textContent=rows.length+" matching listings · "+connected+" sources connected"+(failed?" · "+failed+" unavailable":"");
  if(!rows.length){
-  showFallbackSearches(q,loc,sourceCount?"No matching jobs were found across the connected feeds. Try broadening the title, location or experience filter, or use the external job-search links below.":"The free job feeds could not be reached. You can still continue using the external job-search links below.");
+  showFallbackSearches(q,loc,unique.length?"The connected job feeds returned "+unique.length+" vacancies, but none matched all your filters. Try a broader title or location.":"The connected sources returned no vacancies. Try again later or use the external job-board searches below.");
   return;
  }
  el("jobs").className="";
- el("jobs").innerHTML=rows.slice(0,60).map(x=>'<article class="job"><div><h4>'+esc(x.title)+'</h4><small>'+esc(x.company)+' · '+esc(x.location)+' · Source: <a href="'+esc(x.sourceUrl)+'" target="_blank" rel="noopener">'+esc(x.source)+'</a>'+(x.updatedAt?' · Updated '+esc(x.updatedAt):'')+'</small>'+(x.salary?'<div class="job-meta">'+esc(x.salary)+'</div>':'')+'</div><div><button data-track="'+esc(x.title)+'" data-company="'+esc(x.company)+'" data-url="'+esc(x.url)+'">Track job +</button> <a href="'+esc(x.url)+'" target="_blank" rel="noopener" data-job-open="1" data-track-title="'+esc(x.title)+'" data-track-company="'+esc(x.company)+'" data-track-url="'+esc(x.url)+'">View job ↗</a></div></article>').join("");
+ el("jobs").innerHTML=rows.slice(0,60).map(x=>'<article class="job"><div><h4>'+esc(x.title)+'</h4><small>'+esc(x.company)+' · '+esc(x.location)+' · Source: <a href="'+esc(x.sourceUrl||"#")+'" target="_blank" rel="noopener">'+esc(x.source)+'</a>'+(x.updatedAt?' · Updated '+esc(x.updatedAt):'')+'</small>'+(x.salary?'<div class="job-meta">'+esc(x.salary)+'</div>':'')+'</div><div><button data-track="'+esc(x.title)+'" data-company="'+esc(x.company)+'" data-url="'+esc(x.url)+'">Track job +</button> <a href="'+esc(x.url)+'" target="_blank" rel="noopener" data-job-open="1" data-track-title="'+esc(x.title)+'" data-track-company="'+esc(x.company)+'" data-track-url="'+esc(x.url)+'">View job ↗</a></div></article>').join("");
 }
 const catalog=[["Sales Development Representative",["sales","customer","client","communication","lead","prospecting","negotiation","crm"],"Uses communication and commercial skills to identify and develop customer opportunities."],["Customer Success Associate",["customer","client","support","communication","relationship","account","service"],"A direction for people who enjoy helping customers and building long-term relationships."],["Recruitment Coordinator",["recruitment","human resources","hr","interview","candidate","people","administration"],"Combines organisation and people skills to coordinate hiring and candidate experiences."],["Operations Coordinator",["operations","process","logistics","coordination","planning","administration","supply chain"],"Uses planning and coordination to keep teams and processes moving."],["Office Administrator",["administration","office","organise","scheduling","documents","data entry","management"],"A practical route for people with office, scheduling and organisational experience."],["Project Coordinator",["project","planning","coordination","deadline","stakeholder","reporting","communication"],"Builds on organising tasks, communicating and keeping deadlines on track."],["Marketing Coordinator",["marketing","social media","content","campaign","writing","research","analytics"],"Connects communication and research strengths with campaigns and content."],["Business Development Associate",["business development","sales","partnership","client","negotiation","strategy"],"A route for commercially minded candidates who enjoy finding opportunities."],["Junior Data Analyst",["excel","data","analysis","reporting","sql","statistics","research","spreadsheet"],"May suit candidates with analytical and reporting skills; technical gaps may need training."],["Logistics Coordinator",["logistics","shipping","inventory","warehouse","export","import","supply chain"],"Uses attention to detail and coordination in supply-chain operations."],["Financial Services Associate",["finance","financial","investment","insurance","compliance","advice","budget"],"Uses financial-services knowledge, detail and client communication."],["HR Assistant",["human resources","hr","payroll","employee","onboarding","recruitment","people"],"An entry route into people operations, especially with admin and communication strengths."],["Technical Support Specialist",["technical support","troubleshooting","software","it","customer support","problem solving"],"Combines structured problem-solving with clear user communication."]];function matchCV(){let t=el("cv").value.trim().toLowerCase();if(t.length<40){toast("Add more CV or experience detail first.");return}data.cv=el("cv").value;save();let found=catalog.map(r=>({name:r[0],skills:r[1],why:r[2],hits:r[1].filter(s=>t.includes(s))})).filter(r=>r.hits.length).map(r=>({...r,score:Math.min(98,Math.round(r.hits.length/Math.max(4,Math.min(r.skills.length,7))*100))})).sort((a,b)=>b.score-a.score).slice(0,6);el("matches").className="panel";el("matches").innerHTML='<small>YOUR FIRST CAREER DIRECTIONS</small><h3>Suggested roles</h3><p class="note">Keyword-based suggestions, not a hiring prediction. Review what fits you.</p>'+(found.length?found.map(r=>'<article class="role"><span class="score">'+r.score+'% skill signal</span><h4>'+esc(r.name)+'</h4><p>'+esc(r.why)+'</p><button data-role="'+esc(r.name)+'">Save career</button> <button data-role-search="'+esc(r.name)+'">Find jobs →</button></article>').join(""):'<p>No clear matches yet. Add more detail about responsibilities, skills, education and achievements.');toast("Career suggestions generated locally.")}
 function renderApps(){let box=el("applications");if(!data.apps.length){box.className="empty";box.textContent="No applications tracked yet. Add a job above or track one from search results.";return}box.className="";box.innerHTML=data.apps.map((a,i)=>'<article class="application"><div><strong>'+esc(a.title)+'</strong><small>'+esc(a.company||"Company not specified")+'</small></div><div>'+(a.url?'<a href="'+esc(a.url)+'" target="_blank" rel="noopener">Open listing ↗</a>':'<small>No link added</small>')+'</div><select data-status="'+i+'">'+["Viewed","Interested","Applied","Interview","Offer","Rejected","Not interested","Expired"].map(s=>'<option '+(a.status===s?'selected':'')+'>'+s+'</option>').join("")+'</select><button data-remove="'+i+'">Remove</button></article>').join("")}
