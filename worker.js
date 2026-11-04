@@ -77,21 +77,26 @@ async function tavilySearch(key, query, domains) {
 
 async function selectTopJobs(env, candidates, preferences) {
   if (!candidates.length) return [];
-  const shortlist = candidates.slice(0, 32).map((job, index) => ({
-    index, title: job.title, source: job.source, url: job.url,
-    description: (job.description || "").slice(0, 420)
-  }));
-  const system = "You are a strict job-vacancy evaluator. Assess only supplied results against the candidate criteria and CV. Never invent facts. Exclude generic search pages, homepages, articles, career advice and pages that are not specific vacancies. Prefer direct individual vacancy pages. Return ONLY valid JSON: {selected:[{index:number,matchReason:string,matchScore:number}]}. Select at most 8 genuinely relevant results, ordered best first. Score 1-100. Give one concise evidence-based reason. If none are clearly relevant, return an empty selected array. Do not include URLs in your answer.";
-  const user = "Candidate criteria:\n" + JSON.stringify(preferences) + "\n\nSearch results (index is the only allowed reference):\n" + JSON.stringify(shortlist);
-  const raw = await askAI(env, system, user, 1500);
-  const parsed = extractJSON(raw);
-  if (!Array.isArray(parsed.selected)) throw new Error("The AI did not return a valid job shortlist.");
-  const used = new Set();
-  return parsed.selected.slice(0, 8).map(item => {
-    const index = Number(item.index);
-    if (!Number.isInteger(index) || index < 0 || index >= shortlist.length || used.has(index)) return null;
+  const shortlist = candidates.slice(0, 24).map((job, index) => ({index,title:job.title,source:job.source,description:(job.description||"").slice(0,260)}));
+  const system = "You rank job search results for a candidate. Use only supplied information. Exclude search pages, homepages, articles and advice pages. Prefer specific vacancy pages. Return exactly one valid JSON object and nothing else: {\"selected\":[{\"index\":0,\"matchReason\":\"Short reason\",\"matchScore\":80}]}. Select no more than 8 relevant individual vacancies. Use only indexes from input. If none are relevant return {\"selected\":[]}. Keep each reason under 18 words.";
+  let parsed=null,lastError=null;
+  for (const attempt of [0,1]) {
+    try {
+      const items=attempt===0?shortlist:shortlist.slice(0,14).map(({index,title,source})=>({index,title,source}));
+      const prompt="Candidate criteria: "+JSON.stringify(preferences)+"\nVacancy results: "+JSON.stringify(items)+"\nReturn ONLY valid JSON with selected array. Each item must have index, matchReason and matchScore. Maximum 8.";
+      const raw=await askAI(env,system,prompt,attempt===0?1200:900);
+      parsed=extractJSON(raw);
+      if(Array.isArray(parsed.selected)) break;
+      parsed=null;lastError=new Error("AI response did not contain a selected list.");
+    } catch(error) {lastError=error;parsed=null;}
+  }
+  if(!parsed||!Array.isArray(parsed.selected)) throw lastError||new Error("AI shortlist could not be parsed.");
+  const used=new Set();
+  return parsed.selected.slice(0,8).map(item=>{
+    const index=Number(item.index);
+    if(!Number.isInteger(index)||index<0||index>=shortlist.length||used.has(index)) return null;
     used.add(index);
-    return {...candidates[index], matchReason: clean(item.matchReason, 260), matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 1)))};
+    return {...candidates[index],matchReason:clean(item.matchReason||"Selected as a relevant match based on the supplied job details.",220),matchScore:Math.max(1,Math.min(100,Math.round(Number(item.matchScore)||50)))};
   }).filter(Boolean);
 }
 async function search(env, body) {
@@ -166,7 +171,7 @@ async function search(env, body) {
       query: q, location, experience, workMode, cv: cv.slice(0, 3500), savedCareerRoles: selectedRoles
     });
   } catch (error) {
-    return json({ error: "Search results were found, but AI could not review and shortlist them. Please try again." }, 502);
+    return json({ error: "Search results were found, but the AI shortlist step failed after a retry. Please try again. (" + clean(error.message, 180) + ")" }, 502);
   }
   return json({
     jobs, total: jobs.length, candidatesReviewed: candidates.length, sources,
