@@ -144,12 +144,12 @@ function isDirectoryOrSearchPage(job) {
   try { parsed = new URL(job.url); } catch { return true; }
   const path = decodeURIComponent(parsed.pathname || "").toLowerCase();
   const title = clean(job.title, 200).toLowerCase();
-  const host = parsed.hostname.replace(/^www\\./, "").toLowerCase();
+  const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
 
   // Known category/directory URL patterns, not individual vacancy pages.
-  if (/\\/jobs?\\/(in-|category|categories|search|browse|by-)/i.test(path)) return true;
-  if (/\\/(search|job-search|jobs-search|vacancy-search|browse-jobs)(\\/|$)/i.test(path)) return true;
-  if (host === "untalent.org" && /^\\/jobs?\\//i.test(path)) return true;
+  if (/\/jobs?\/(in-|category|categories|search|browse|by-)/i.test(path)) return true;
+  if (/\/(search|job-search|jobs-search|vacancy-search|browse-jobs)(\/|$)/i.test(path)) return true;
+  if (host === "untalent.org" && /^\/jobs?\//i.test(path)) return true;
 
   // Reject generic page titles that describe collections rather than one role.
   const genericTitles = [
