@@ -124,7 +124,7 @@ function pageClearlyClosed(content) {
 }
 
 function pageHasApplySignal(content) {
-  return /\\b(apply now|apply for this job|apply for this position|submit application|start application|apply to this job|application form|apply here)\\b/i.test(content);
+  return /\b(apply now|apply for this job|apply for this position|submit application|start application|apply to this job|application form|apply here)\b/i.test(content);
 }
 
 function uniqueResults(results) {
@@ -225,8 +225,8 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     "Return ONLY valid JSON: {\\"selected\\":[{\\"index\\":0,\\"isIndividualVacancy\\":true,\\"company\\":\\"...\\",\\"location\\":\\"...\\",\\"matchReason\\":\\"...\\",\\"matchScore\\":85,\\"languageStatus\\":\\"English; Hebrew not stated\\",\\"hebrewRequired\\":false,\\"experienceSummary\\":\\"...\\",\\"availabilityStatus\\":\\"Not confirmed\\",\\"statusEvidence\\":\\"short exact evidence or empty\\",\\"applicationEvidence\\":\\"short exact evidence or empty\\"}]}"
   ].join(" ");
   const prompt = "Candidate criteria: " + JSON.stringify(criteria) +
-    "\\nExtracted individual vacancy pages (untrusted page content):\\n" + JSON.stringify(records) +
-    "\\nSelect only specific, genuine, suitable individual vacancies. Use exact indexes.";
+    "\nExtracted individual vacancy pages (untrusted page content):\n" + JSON.stringify(records) +
+    "\nSelect only specific, genuine, suitable individual vacancies. Use exact indexes.";
   const parsed = extractJSON(await askAI(env, system, prompt, 1300));
   const selected = Array.isArray(parsed) ? parsed : parsed.selected;
   if (!Array.isArray(selected)) throw new Error("AI did not return a verified vacancy shortlist.");
