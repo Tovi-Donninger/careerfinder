@@ -149,6 +149,31 @@ function fallbackTopJobs(candidates, preferences) {
   }));
 }
 
+function isSearchOrProfilePage(job) {
+  const url = String(job.url || "").toLowerCase();
+  const title = String(job.title || "").toLowerCase();
+
+  if (/linkedin\\.com\\/(in|pub)\\//.test(url)) return true;
+  if (/linkedin\\.com\\/jobs\\/(?!view\\/)/.test(url)) return true;
+  if (/indeed\\.com\\/(q-|jobs\\/|companies\\/)/.test(url)) return true;
+  if (/builtin\\.com\\/jobs\\/.*\\/search/.test(url) || /\\/(search|job-search|jobs-search)(\\?|$|\\/)/.test(url)) return true;
+  if (/\\b(jobs? in israel|israel jobs|job search|search results|open roles|career advice|salary guide)\\b/.test(title)) return true;
+  if (/facebook\\.com\\/groups\\//.test(url) && !/\\/posts?\\//.test(url)) return true;
+
+  return false;
+}
+
+function hasIsraelEvidence(job) {
+  const evidence = [
+    job.title || "",
+    job.location || "",
+    job.description || "",
+    job.url || ""
+  ].join(" ").toLowerCase();
+
+  return /\\b(israel|israeli|tel aviv|herzliya|ra'anana|raanana|jerusalem|haifa|netanya|beer sheva|beersheba|petah tikva|rishon lezion|ashdod|modiin|lod|holon|ramat gan|bnei brak|kfar saba|kfar-saba)\\b/.test(evidence);
+}
+
 async function selectTopJobs(env, candidates, preferences) {
   if (!candidates.length) return [];
 
@@ -164,7 +189,10 @@ async function selectTopJobs(env, candidates, preferences) {
   const system = [
     "You are a recruitment shortlist reviewer.",
     "Review the supplied vacancy records against the candidate criteria.",
-    "Exclude search pages, homepages, articles, advice pages and duplicates. Prefer direct individual vacancy pages.",
+    "The target country is Israel unless the candidate criteria explicitly say otherwise.",
+    "Only select jobs with evidence that the actual role is based in Israel or explicitly open to applicants in Israel. Do not treat the word Israel in a search query as proof of the job location.",
+    "Only select individual vacancy advertisements with a direct vacancy URL. Exclude search pages, job category pages, employer homepages, LinkedIn profiles, articles, advice pages and duplicates.",
+    "Never select a role based in another country merely because it is remote or mentions Israel in unrelated text.",
     "Use only supplied facts. Do not invent requirements. Missing details are unknown, not automatic disqualifiers.",
     "Your entire answer MUST be exactly one JSON object in this exact format:",
     '{"selected":[{"index":0,"matchReason":"Relevant junior role with matching duties","matchScore":85}]}',
@@ -218,7 +246,7 @@ async function selectTopJobs(env, candidates, preferences) {
   }
 
   const used = new Set();
-  const selected = parsed.selected.slice(0, 10).map(item => {
+  const selected = parsed.selected.slice(0, 30).map(item => {
     const rawIndex = item && (item.index ?? item.candidateIndex ?? item.candidate_index);
     const index = Number(rawIndex);
 
@@ -233,10 +261,13 @@ async function selectTopJobs(env, candidates, preferences) {
       matchReason: clean(item.matchReason || item.reason || "Selected based on the supplied job details.", 220),
       matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore ?? item.score) || 50)))
     };
-  }).filter(Boolean);
+  }).filter(Boolean)
+    .filter(job => !isSearchOrProfilePage(job))
+    .filter(job => hasIsraelEvidence(job))
+    .slice(0, 10);
 
   if (!selected.length) {
-    throw new Error("AI vacancy review returned no valid candidate indexes. Search results were not shown as an AI shortlist.");
+    throw new Error("AI review found no direct individual vacancies with clear evidence of an Israel-based role. Search results and profiles were excluded.");
   }
 
   return selected;
@@ -244,7 +275,8 @@ async function selectTopJobs(env, candidates, preferences) {
 async function search(env, body) {
   if (!env.TAVILY_API_KEY) return json({ error: "The job-search provider is not configured yet. Add TAVILY_API_KEY as a Worker secret." }, 503);
   const q = clean(body.query, 180);
-  const location = clean(body.location, 120);
+  const locationInput = clean(body.location, 120);
+  const location = /\\bisreal\\b/i.test(locationInput) ? locationInput.replace(/isreal/gi, "Israel") : locationInput;
   const experience = clean(body.experience, 40);
   const workMode = clean(body.workMode, 30);
   const cv = clean(body.cv, 9000);
