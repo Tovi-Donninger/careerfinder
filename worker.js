@@ -229,10 +229,10 @@ function experienceFits(job, level) {
   const seniorSignals = /\\b(senior|lead|principal|head of|director|chief|vice president|vp)\\b/.test(title);
   const managerSignals = /\\b(manager|management|team lead|head of)\\b/.test(title);
   const juniorSignals = /\\b(junior|assistant|trainee|intern|graduate|entry[- ]level|coordinator)\\b/.test(title);
-  if (level === "no-experience") return explicitNoExperience && maxYears === 0 && !seniorSignals && !managerSignals;
+  if (level === "no-experience") return maxYears === 0 && !seniorSignals && !managerSignals;
   if (level === "internship") return /intern(ship)?|trainee/i.test(text);
-  if (level === "entry") return (explicitNoExperience || juniorSignals) && maxYears <= 1 && !seniorSignals && !managerSignals;
-  if (level === "junior") return (juniorSignals || explicitNoExperience || (maxYears > 0 && maxYears <= 2)) && maxYears <= 2 && !seniorSignals && !managerSignals;
+  if (level === "entry") return maxYears <= 1 && !seniorSignals && !managerSignals;
+  if (level === "junior") return maxYears <= 2 && !seniorSignals && !managerSignals;
   if (level === "associate") return /\\bassociate\\b/i.test(title) && maxYears <= 4 && !seniorSignals;
   if (level === "mid") return /\\b(mid[- ]level|experienced|specialist)\\b/i.test(title) && maxYears >= 3 && maxYears <= 7 && !seniorSignals;
   if (level === "senior") return seniorSignals || maxYears >= 7;
