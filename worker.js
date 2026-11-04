@@ -519,7 +519,7 @@ async function verifyVacancyStatus(job) {
 }
 
 async function verifyAndLimitJobs(jobs, limit = 15) {
-  const checks = await Promise.all(jobs.slice(0, 35).map(job => verifyVacancyStatus(job)));
+  const checks = await Promise.all(jobs.slice(0, 16).map(job => verifyVacancyStatus(job)));
   const results = [];
   const seen = new Set();
   for (let i = 0; i < checks.length; i++) {
@@ -572,7 +572,7 @@ async function search(env, body) {
     ].join("\n");
     const raw = await askAI(env, "You are a job-search query planner. Never invent jobs or employers. Output valid JSON only.", prompt, 1100);
     const planned = extractJSON(raw);
-    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 6).map(x => clean(x, 220)).filter(Boolean) : [];
+    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 4).map(x => clean(x, 220)).filter(Boolean) : [];
     suggestions = Array.isArray(planned.careerSuggestions) ? planned.careerSuggestions.slice(0, 5).map(x => ({
       title: clean(x.title, 100), reason: clean(x.reason, 260), searchTerms: clean(x.searchTerms || x.title, 150)
     })).filter(x => x.title) : [];
@@ -597,7 +597,7 @@ async function search(env, body) {
     ["jobylon.com", "comeet.com", "breezy.hr", "workable.com", "ashbyhq.com"]
   ];
   const tasks = [];
-  for (let i = 0; i < Math.min(queries.length, 6); i++) {
+  for (let i = 0; i < Math.min(queries.length, 4); i++) {
     const phrase = queries[i] + place + mode + exp + " jobs vacancies";
     const domains = boardGroups[i % boardGroups.length];
     tasks.push(tavilySearch(env.TAVILY_API_KEY, phrase, domains));
@@ -640,13 +640,13 @@ async function search(env, body) {
   try {
     // Inspect the actual employer pages first. The AI must rank real vacancy
     // descriptions, not short search-engine snippets or directory pages.
-    const pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 35), 35);
+    const pageCheckedCandidates = await verifyAndLimitJobs(candidates.slice(0, 16), 16);
     if (!pageCheckedCandidates.length) {
       return json({
         jobs: [],
         total: 0,
         candidatesReviewed: candidates.length,
-        pagesChecked: Math.min(candidates.length, 35),
+        pagesChecked: Math.min(candidates.length, 16),
         sources,
         generatedAt: new Date().toISOString(),
         profileSummary: "CareerFinder checked the employer pages but could not confirm enough individual vacancy descriptions. No generic job-search pages were shown."
@@ -665,7 +665,7 @@ async function search(env, body) {
     generatedAt: new Date().toISOString(),
     profileSummary: usedFallback
       ? "The AI review service was temporarily unavailable, so CareerFinder ranked the collected vacancies using your keywords and job details."
-      : "AI reviewed " + candidates.length + " individual vacancy candidates, checked employer pages for closure notices, and selected up to 15 suitable jobs.",
+      : "AI reviewed " + pageCheckedCandidates.length + " employer-verified individual vacancy pages and selected up to 15 suitable jobs.",
     careerSuggestions: [], searchQueries: []
   });
 }
