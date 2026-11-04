@@ -153,14 +153,58 @@ function isSearchOrProfilePage(job) {
   const url = String(job.url || "").toLowerCase();
   const title = String(job.title || "").toLowerCase();
 
-  if (/linkedin\\.com\\/(in|pub)\\//.test(url)) return true;
-  if (/linkedin\\.com\\/jobs\\/(?!view\\/)/.test(url)) return true;
-  if (/indeed\\.com\\/(q-|jobs\\/|companies\\/)/.test(url)) return true;
-  if (/builtin\\.com\\/jobs\\/.*\\/search/.test(url) || /\\/(search|job-search|jobs-search)(\\?|$|\\/)/.test(url)) return true;
-  if (/\\b(jobs? in israel|israel jobs|job search|search results|open roles|career advice|salary guide)\\b/.test(title)) return true;
-  if (/facebook\\.com\\/groups\\//.test(url) && !/\\/posts?\\//.test(url)) return true;
+  // Personal profiles and broad job-search/category pages are never vacancies.
+  if (/linkedin\.com\/(in|pub)\//.test(url)) return true;
+  if (/linkedin\.com\/jobs\/(?!view\/)/.test(url)) return true;
+  if (/indeed\.com\/(q-|jobs\/|companies\/)/.test(url)) return true;
+  if (/builtin\.com\/jobs\/.*\/search/.test(url)) return true;
+  if (/\/(search|job-search|jobs-search)(\/|\?|$)/.test(url)) return true;
+  if (/\b(jobs? in israel|israel jobs|job search|search results|open roles|career advice|salary guide)\b/.test(title)) return true;
+  if (/facebook\.com\/groups\//.test(url) && !/\/posts?\//.test(url)) return true;
 
   return false;
+}
+
+function isIndividualVacancyURL(job) {
+  let url;
+  try {
+    url = new URL(job.url);
+  } catch {
+    return false;
+  }
+
+  const host = url.hostname.toLowerCase().replace(/^www\./, "");
+  const path = url.pathname.toLowerCase();
+
+  if (host === "linkedin.com" || host.endsWith(".linkedin.com")) {
+    return /^\/jobs\/view\/[^/]+/.test(path);
+  }
+  if (host === "indeed.com" || host.endsWith(".indeed.com")) {
+    return /^\/viewjob\/?$/.test(path) && Boolean(url.searchParams.get("jk"));
+  }
+  if (host.endsWith("smartrecruiters.com")) {
+    return path.split("/").filter(Boolean).length >= 2 && /\d{5,}/.test(path);
+  }
+  if (host === "lever.co" || host.endsWith(".lever.co")) {
+    return path.split("/").filter(Boolean).length >= 2;
+  }
+  if (host === "greenhouse.io" || host.endsWith(".greenhouse.io")) {
+    return /\/jobs\/\d+/.test(path);
+  }
+  if (host === "ashbyhq.com" || host.endsWith(".ashbyhq.com")) {
+    return path.split("/").filter(Boolean).length >= 2;
+  }
+  if (host === "workable.com" || host.endsWith(".workable.com")) {
+    return path.includes("/j/") || path.includes("/jobs/");
+  }
+  if (host === "facebook.com" || host.endsWith(".facebook.com")) {
+    return /\/groups\/[^/]+\/posts?\/\d+/.test(path);
+  }
+
+  // For other employers' career sites, require a job-like path and a
+  // non-trivial URL rather than accepting a homepage or category landing page.
+  return /\/(job|jobs|career|careers|vacancy|vacancies|position|positions)\//.test(path)
+    && path.split("/").filter(Boolean).length >= 2;
 }
 
 function hasIsraelEvidence(job) {
@@ -171,7 +215,7 @@ function hasIsraelEvidence(job) {
     job.url || ""
   ].join(" ").toLowerCase();
 
-  return /\\b(israel|israeli|tel aviv|herzliya|ra'anana|raanana|jerusalem|haifa|netanya|beer sheva|beersheba|petah tikva|rishon lezion|ashdod|modiin|lod|holon|ramat gan|bnei brak|kfar saba|kfar-saba)\\b/.test(evidence);
+  return /\b(israel|israeli|tel aviv|herzliya|ra'anana|raanana|jerusalem|haifa|netanya|beer sheva|beersheba|petah tikva|rishon lezion|ashdod|modiin|lod|holon|ramat gan|bnei brak|kfar saba|kfar-saba)\b/.test(evidence);
 }
 
 async function selectTopJobs(env, candidates, preferences) {
@@ -276,7 +320,7 @@ async function search(env, body) {
   if (!env.TAVILY_API_KEY) return json({ error: "The job-search provider is not configured yet. Add TAVILY_API_KEY as a Worker secret." }, 503);
   const q = clean(body.query, 180);
   const locationInput = clean(body.location, 120);
-  const location = /\\bisreal\\b/i.test(locationInput) ? locationInput.replace(/isreal/gi, "Israel") : locationInput;
+  const location = /\bisreal\b/i.test(locationInput) ? locationInput.replace(/isreal/gi, "Israel") : locationInput;
   const experience = clean(body.experience, 40);
   const workMode = clean(body.workMode, 30);
   const cv = clean(body.cv, 9000);
@@ -330,15 +374,26 @@ async function search(env, body) {
   const seen = new Set();
   const candidates = all.filter(item => {
     try {
-      const url = new URL(item.url); url.hash = "";
+      const url = new URL(item.url);
+      url.hash = "";
       for (const param of [...url.searchParams.keys()]) {
         if (/^(utm_|gclid$|fbclid$|ref$)/i.test(param)) url.searchParams.delete(param);
       }
       const key = url.href.replace(/\/$/, "").toLowerCase();
       if (seen.has(key)) return false;
-      seen.add(key); item.url = url.href; return true;
-    } catch { return false; }
-  }).sort((a, b) => b.score - a.score).slice(0, 32);
+      seen.add(key);
+      item.url = url.href;
+      return true;
+    } catch {
+      return false;
+    }
+  })
+    // Do not ask the AI to rank category pages or profiles as if they were jobs.
+    .filter(item => !isSearchOrProfilePage(item))
+    .filter(item => isIndividualVacancyURL(item))
+    .filter(item => hasIsraelEvidence(item))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 32);
   let jobs;
   try {
     jobs = await selectTopJobs(env, candidates, {
