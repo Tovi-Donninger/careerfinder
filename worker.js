@@ -197,6 +197,9 @@ function isIndividualVacancyURL(job) {
   if (host === "workable.com" || host.endsWith(".workable.com")) {
     return path.includes("/j/") || path.includes("/jobs/");
   }
+  if (/(^|\\.)((jobvite|icims|personio|bamboohr|recruitee|teamtailor|workday|myworkdayjobs|oraclecloud|successfactors|ultipro|jobylon|comeet|breezy)\\.com|breezy\\.hr)$/.test(host)) {
+    return path.split("/").filter(Boolean).length >= 2 && !/\\/(search|careers|jobs)\\/?$/.test(path);
+  }
   if (host === "facebook.com" || host.endsWith(".facebook.com")) {
     return /\/groups\/[^/]+\/posts?\/\d+/.test(path);
   }
@@ -240,7 +243,7 @@ async function selectTopJobs(env, candidates, preferences) {
     "Use only supplied facts. Do not invent requirements. Missing details are unknown, not automatic disqualifiers.",
     "Your entire answer MUST be exactly one JSON object in this exact format:",
     '{"selected":[{"index":0,"matchReason":"Relevant junior role with matching duties","matchScore":85}]}',
-    "The selected value MUST be an array. Each index MUST be copied from an input record. Select up to 15 strongest matches, best first. Return no markdown, no explanation and no other keys."
+    "The selected value MUST be an array. Each index MUST be copied from an input record. Select up to 30 strongest matches, best first. This is a pre-verification shortlist; return as many relevant individual vacancies as the records support. Return no markdown, no explanation and no other keys."
   ].join(" ");
 
   let parsed = null;
@@ -400,7 +403,7 @@ async function search(env, body) {
     ].join("\n");
     const raw = await askAI(env, "You are a job-search query planner. Never invent jobs or employers. Output valid JSON only.", prompt, 1100);
     const planned = extractJSON(raw);
-    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 6).map(x => clean(x, 220)).filter(Boolean) : [];
+    queries = Array.isArray(planned.searchQueries) ? planned.searchQueries.slice(0, 8).map(x => clean(x, 220)).filter(Boolean) : [];
     suggestions = Array.isArray(planned.careerSuggestions) ? planned.careerSuggestions.slice(0, 5).map(x => ({
       title: clean(x.title, 100), reason: clean(x.reason, 260), searchTerms: clean(x.searchTerms || x.title, 150)
     })).filter(x => x.title) : [];
