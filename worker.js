@@ -74,6 +74,26 @@ async function tavilySearch(key, query, domains) {
     foundAt: new Date().toISOString()
   })).filter(x => x.title && x.url && /^https?:\/\//i.test(x.url));
 }
+
+async function selectTopJobs(env, candidates, preferences) {
+  if (!candidates.length) return [];
+  const shortlist = candidates.slice(0, 32).map((job, index) => ({
+    index, title: job.title, source: job.source, url: job.url,
+    description: (job.description || "").slice(0, 420)
+  }));
+  const system = "You are a strict job-vacancy evaluator. Assess only supplied results against the candidate criteria and CV. Never invent facts. Exclude generic search pages, homepages, articles, career advice and pages that are not specific vacancies. Prefer direct individual vacancy pages. Return ONLY valid JSON: {selected:[{index:number,matchReason:string,matchScore:number}]}. Select at most 8 genuinely relevant results, ordered best first. Score 1-100. Give one concise evidence-based reason. If none are clearly relevant, return an empty selected array. Do not include URLs in your answer.";
+  const user = "Candidate criteria:\n" + JSON.stringify(preferences) + "\n\nSearch results (index is the only allowed reference):\n" + JSON.stringify(shortlist);
+  const raw = await askAI(env, system, user, 1500);
+  const parsed = extractJSON(raw);
+  if (!Array.isArray(parsed.selected)) throw new Error("The AI did not return a valid job shortlist.");
+  const used = new Set();
+  return parsed.selected.slice(0, 8).map(item => {
+    const index = Number(item.index);
+    if (!Number.isInteger(index) || index < 0 || index >= shortlist.length || used.has(index)) return null;
+    used.add(index);
+    return {...candidates[index], matchReason: clean(item.matchReason, 260), matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 1)))};
+  }).filter(Boolean);
+}
 async function search(env, body) {
   if (!env.TAVILY_API_KEY) return json({ error: "The job-search provider is not configured yet. Add TAVILY_API_KEY as a Worker secret." }, 503);
   const q = clean(body.query, 180);
@@ -129,7 +149,7 @@ async function search(env, body) {
   const sources = settled.map((item, index) => ({ name: index === tasks.length - 1 ? "Wider web search" : "Job-board group " + (index + 1), status: item.status === "fulfilled" ? "connected" : "unavailable" }));
   const all = settled.flatMap(item => item.status === "fulfilled" ? item.value : []);
   const seen = new Set();
-  const jobs = all.filter(item => {
+  const candidates = all.filter(item => {
     try {
       const url = new URL(item.url); url.hash = "";
       for (const param of [...url.searchParams.keys()]) {
@@ -139,8 +159,21 @@ async function search(env, body) {
       if (seen.has(key)) return false;
       seen.add(key); item.url = url.href; return true;
     } catch { return false; }
-  }).sort((a, b) => b.score - a.score).slice(0, 40);
-  return json({ jobs, total: jobs.length, sources, generatedAt: new Date().toISOString(), profileSummary, careerSuggestions: suggestions, searchQueries: queries });
+  }).sort((a, b) => b.score - a.score).slice(0, 32);
+  let jobs;
+  try {
+    jobs = await selectTopJobs(env, candidates, {
+      query: q, location, experience, workMode, cv: cv.slice(0, 3500), savedCareerRoles: selectedRoles
+    });
+  } catch (error) {
+    return json({ error: "Search results were found, but AI could not review and shortlist them. Please try again." }, 502);
+  }
+  return json({
+    jobs, total: jobs.length, candidatesReviewed: candidates.length, sources,
+    generatedAt: new Date().toISOString(),
+    profileSummary: "AI reviewed " + candidates.length + " search results and selected the strongest matching individual vacancies.",
+    careerSuggestions: [], searchQueries: []
+  });
 }
 export default {
   async fetch(request, env) {
