@@ -40,3 +40,7 @@
 @media(max-width:600px){.employer-connectors{grid-template-columns:1fr;padding:16px}.employer-connectors>div,.employer-connectors .connector-help{grid-column:auto}}
 .job-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:7px;font-size:10px;color:#56734c}
 .match-score{background:#eff8e7;border:1px solid #dcebd2;border-radius:20px;padding:4px 7px;font-weight:700}
+
+.sources-subheading{margin:22px 0 10px;padding-top:17px;border-top:1px solid var(--line)}
+.sources-subheading h4{font:700 13px Manrope;margin:0 0 5px;color:var(--ink)}
+.sources-subheading p{font-size:11px;line-height:1.5;color:var(--muted);margin:0}
