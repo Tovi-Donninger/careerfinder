@@ -203,7 +203,8 @@ async function reviewVacancies(env, candidates, criteria) {
 async function search(env, body) {
   if (!env.TAVILY_API_KEY) return json({ error: "Job search is not configured. Add the TAVILY_API_KEY Worker secret." }, 503);
   const query = clean(body.query, 180);
-  const location = clean(body.location, 120) || "Israel";
+  const requestedLocation = clean(body.location, 120);
+  const location = !requestedLocation || /^isreal$/i.test(requestedLocation) ? "Israel" : requestedLocation;
   const experience = clean(body.experience, 40) || "any";
   const workMode = clean(body.workMode, 30) || "any";
   const cv = clean(body.cv, 9000);
