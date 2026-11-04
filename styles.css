@@ -55,3 +55,22 @@
 .external-search>p{font-size:11px;line-height:1.5;color:var(--muted);margin:12px 0}
 .external-search .source-links{grid-template-columns:repeat(3,minmax(0,1fr))}
 @media(max-width:600px){.external-search summary{align-items:flex-start;flex-direction:column;gap:4px}.external-search summary span{margin-left:0}.external-search .source-links{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* AI career analysis and aggregated job-search results */
+.ai-summary{margin:14px 0;padding:12px 15px;border-left:3px solid #9bc56b;background:#f0f6e9;border-radius:0 9px 9px 0;color:#455b48;font-size:12px;line-height:1.55}
+.job{align-items:flex-start}
+.job-main{min-width:0;flex:1}
+.job-main p{font-size:11px;line-height:1.55;color:#66756c;margin:8px 0 0;max-width:760px}
+.job-actions{display:flex;flex-direction:column;gap:7px;flex:none}
+.job-actions a,.job-actions button{display:inline-flex;justify-content:center;align-items:center;white-space:nowrap;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink);font:700 11px "DM Sans";text-decoration:none;cursor:pointer}
+.job-actions a{background:#20342b;color:#fff;border-color:#20342b}
+.ai-suggestions{margin:18px 0;padding:16px;background:#fbfcfa;border:1px solid var(--line);border-radius:12px}
+.ai-suggestions strong{display:block;font:700 12px Manrope;margin-bottom:10px}
+.ai-suggestions>div,.skill-chips{display:flex;flex-wrap:wrap;gap:7px}
+.suggestion-chip,.skill-chip{display:inline-flex;padding:6px 9px;border-radius:20px;background:#eff5e9;color:#476342;font-size:10px;font-weight:700}
+#matches>h4{font:700 12px Manrope;margin:17px 0 8px}
+#matches>p{font-size:12px;line-height:1.6;color:#68766e}
+.ai-list{padding-left:18px;color:#65736a;font-size:11px;line-height:1.7}
+.role-actions{display:flex;gap:7px;margin-top:9px}
+.role small{font-size:10px;color:#718078}
+@media(max-width:700px){.job-actions{width:100%;flex-direction:row;flex-wrap:wrap}.job-actions>*{flex:1}.job{flex-direction:column}.job-main{width:100%}}
