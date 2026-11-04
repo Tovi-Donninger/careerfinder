@@ -633,8 +633,13 @@ async function search(env, body) {
     // Do not ask the AI to rank category pages or profiles as if they were jobs.
     .filter(item => !isSearchOrProfilePage(item))
     .filter(item => isIndividualVacancyURL(item))
-    .filter(item => hasIsraelEvidence(item))
-    .sort((a, b) => b.score - a.score)
+    // Search snippets often omit the job's location. Do not discard a
+    // potentially valid vacancy until the actual employer page is inspected.
+    // Prioritise results that already mention Israel, but verify location later.
+    .sort((a, b) => {
+      const israelPriority = Number(hasIsraelEvidence(b)) - Number(hasIsraelEvidence(a));
+      return israelPriority || b.score - a.score;
+    })
     .slice(0, 80);
   let jobs;
   let pageCheckedCandidates = [];
