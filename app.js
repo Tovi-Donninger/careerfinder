@@ -126,4 +126,38 @@ async function matchCV(){
  }finally{stopCVLoading();button.disabled=false;button.textContent="Analyse my experience →"}
 }
 function renderApps(){let box=el("applications");if(!data.apps.length){box.className="empty";box.textContent="No applications tracked yet. Add a job above or track one from search results.";return}box.className="";box.innerHTML=data.apps.map((a,i)=>'<article class="application"><div><strong>'+esc(a.title)+'</strong><small>'+esc(a.company||"Company not specified")+'</small></div><div>'+(a.url?'<a href="'+esc(a.url)+'" target="_blank" rel="noopener">Open listing ↗</a>':'<small>No link added</small>')+'</div><select data-status="'+i+'">'+["Viewed","Interested","Applied","Interview","Offer","Rejected","Not interested","Expired"].map(s=>'<option '+(a.status===s?'selected':'')+'>'+s+'</option>').join("")+'</select><button data-remove="'+i+'">Remove</button></article>').join("")}
-el("search-form").addEventListener("submit",search);el("cv").value=data.cv||"";el("cvfile").addEventListener("change",async e=>{let f=e.target.files[0];if(!f)return;if(!f.name.toLowerCase().endsWith(".txt")){toast("This prototype accepts .txt files. Paste text from PDF or Word.");return}el("cv").value=await f.text();toast("Text CV loaded in this browser.")});el("analyse").addEventListener("click",matchCV);el("add-form").addEventListener("submit",e=>{e.preventDefault();data.apps.unshift({title:el("app-title").value,company:el("company").value,url:el("app-url").value,status:"Interested"});e.target.reset();save();renderApps();toast("Added to your tracker.")});document.addEventListener("click",e=>{const opened=e.target.closest("[data-job-open]");if(opened){const url=opened.dataset.trackUrl;if(!data.apps.some(a=>a.url===url)){data.apps.unshift({title:opened.dataset.trackTitle,company:opened.dataset.trackCompany,url,status:"Viewed"});save();renderApps();toast("Listing saved as Viewed.");}return}let b=e.target.closest("[data-track]");if(b){data.apps.unshift({title:b.dataset.track,company:b.dataset.company,url:b.dataset.url,status:"Interested"});save();renderApps();toast("Job added to tracker.");return}b=e.target.closest("[data-role]");if(b){if(!data.roles.includes(b.dataset.role))data.roles.push(b.dataset.role);save();toast("Career saved.");return}b=e.target.closest("[data-role-search]");if(b){const role=b.dataset.roleSearch;el("query").value=role;el("location").value=el("location").value.trim();el("search").scrollIntoView({behavior:"smooth"});el("search-form").requestSubmit();return}b=e.target.closest("[data-remove]");if(b){data.apps.splice(+b.dataset.remove,1);save();renderApps()}});document.addEventListener("change",e=>{let s=e.target.closest("[data-status]");if(s){data.apps[+s.dataset.status].status=s.value;save();toast("Status updated.")}});renderApps();stats();
+el("search-form").addEventListener("submit",search);el("cv").value=data.cv||"";async function extractCVFile(file){
+ const name=file.name.toLowerCase();
+ if(file.size>10*1024*1024)throw Error("Please choose a file smaller than 10 MB.");
+ if(name.endsWith(".txt"))return await file.text();
+ if(name.endsWith(".docx")){
+  if(!window.mammoth)throw Error("The Word document reader did not load. Refresh the page and try again.");
+  const result=await window.mammoth.extractRawText({arrayBuffer:await file.arrayBuffer()});
+  return result.value||"";
+ }
+ if(name.endsWith(".pdf")){
+  if(!window.pdfjsLib)throw Error("The PDF reader did not load. Refresh the page and try again.");
+  window.pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  const pdf=await window.pdfjsLib.getDocument({data:await file.arrayBuffer()}).promise;
+  if(pdf.numPages>40)throw Error("This CV has more than 40 pages. Please upload a shorter version.");
+  let pages=[];
+  for(let n=1;n<=pdf.numPages;n++){
+   const page=await pdf.getPage(n);
+   const content=await page.getTextContent();
+   pages.push(content.items.map(item=>item.str||"").join(" "));
+  }
+  return pages.join("\n");
+ }
+ throw Error("Please upload a PDF, Word (.docx) or text (.txt) CV.");
+}
+el("cvfile").addEventListener("change",async e=>{
+ const file=e.target.files[0];if(!file)return;
+ const button=el("analyse");button.disabled=true;button.textContent="Reading your CV…";
+ try{
+  const extracted=await extractCVFile(file);
+  if(extracted.trim().length<40)throw Error("No readable text was found. If this is a scanned PDF, please upload a text-based PDF or paste the CV text for now.");
+  el("cv").value=extracted.trim();data.cv=extracted.trim();save();
+  toast("CV text extracted. You can now analyse it.");
+ }catch(error){toast(error.message||"Could not read that file.");}
+ finally{button.disabled=false;button.textContent="Analyse my experience →";e.target.value="";}
+});el("analyse").addEventListener("click",matchCV);el("add-form").addEventListener("submit",e=>{e.preventDefault();data.apps.unshift({title:el("app-title").value,company:el("company").value,url:el("app-url").value,status:"Interested"});e.target.reset();save();renderApps();toast("Added to your tracker.")});document.addEventListener("click",e=>{const opened=e.target.closest("[data-job-open]");if(opened){const url=opened.dataset.trackUrl;if(!data.apps.some(a=>a.url===url)){data.apps.unshift({title:opened.dataset.trackTitle,company:opened.dataset.trackCompany,url,status:"Viewed"});save();renderApps();toast("Listing saved as Viewed.");}return}let b=e.target.closest("[data-track]");if(b){data.apps.unshift({title:b.dataset.track,company:b.dataset.company,url:b.dataset.url,status:"Interested"});save();renderApps();toast("Job added to tracker.");return}b=e.target.closest("[data-role]");if(b){if(!data.roles.includes(b.dataset.role))data.roles.push(b.dataset.role);save();toast("Career saved.");return}b=e.target.closest("[data-role-search]");if(b){const role=b.dataset.roleSearch;el("query").value=role;el("location").value=el("location").value.trim();el("search").scrollIntoView({behavior:"smooth"});el("search-form").requestSubmit();return}b=e.target.closest("[data-remove]");if(b){data.apps.splice(+b.dataset.remove,1);save();renderApps()}});document.addEventListener("change",e=>{let s=e.target.closest("[data-status]");if(s){data.apps[+s.dataset.status].status=s.value;save();toast("Status updated.")}});renderApps();stats();
