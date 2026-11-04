@@ -1,26 +1,32 @@
 const KEY="careerfinder-v1";let data;try{data=JSON.parse(localStorage.getItem(KEY))||{apps:[],roles:[],cv:""}}catch{data={apps:[],roles:[],cv:""}}let searches=0;const el=id=>document.getElementById(id);const esc=s=>String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));function save(){localStorage.setItem(KEY,JSON.stringify(data));stats()}function stats(){el("search-count").textContent=searches;el("role-count").textContent=data.roles.length;el("app-count").textContent=data.apps.length}function toast(s){el("toast").textContent=s;el("toast").classList.add("show");setTimeout(()=>el("toast").classList.remove("show"),2200)}
 function showExternalSearches(q,loc){
- const encoded=encodeURIComponent([q,loc].filter(Boolean).join(" "));
+ const mode=el("work-mode")?el("work-mode").value:"any";
+ const suffix=mode==="remote"?" remote":mode==="hybrid"?" hybrid":mode==="onsite"?" on-site":"";
+ const term=q+suffix;
+ const encoded=encodeURIComponent([term,loc].filter(Boolean).join(" "));
  const links=[
-  ["LinkedIn Jobs","https://www.linkedin.com/jobs/search/?keywords="+encodeURIComponent(q)+"&location="+encodeURIComponent(loc)],
-  ["Indeed","https://www.indeed.com/jobs?q="+encodeURIComponent(q)+"&l="+encodeURIComponent(loc)],
-  ["Glassdoor","https://www.glassdoor.com/Job/jobs.htm?sc.keyword="+encodeURIComponent(q)+"&locT=C&locName="+encodeURIComponent(loc)],
+  ["LinkedIn Jobs","https://www.linkedin.com/jobs/search/?keywords="+encodeURIComponent(term)+"&location="+encodeURIComponent(loc)],
+  ["Indeed","https://www.indeed.com/jobs?q="+encodeURIComponent(term)+"&l="+encodeURIComponent(loc)],
+  ["Glassdoor","https://www.glassdoor.com/Job/jobs.htm?sc.keyword="+encodeURIComponent(term)+"&locName="+encodeURIComponent(loc)],
   ["Facebook groups & posts","https://www.facebook.com/search/posts/?q="+encoded],
-  ["Google Jobs / web search","https://www.google.com/search?q="+encoded+"+jobs"]
+  ["We Work Remotely","https://weworkremotely.com/remote-jobs/search?term="+encodeURIComponent(q)],
+  ["Remote OK","https://remoteok.com/remote-"+encodeURIComponent(q.toLowerCase().replace(/\s+/g,"-"))+"-jobs"],
+  ["Himalayas","https://himalayas.app/jobs?search="+encodeURIComponent(q)],
+  ["Wellfound","https://wellfound.com/role/r/"+encodeURIComponent(q.toLowerCase().replace(/\s+/g,"-"))],
+  ["Working Nomads","https://www.workingnomads.com/jobs?search="+encodeURIComponent(q)],
+  ["FlexJobs (subscription)","https://www.flexjobs.com/search?search="+encodeURIComponent(q)],
+  ["Remote.co","https://remote.co/remote-jobs/"],
+  ["JustRemote","https://justremote.co/remote-jobs"],
+  ["Jobspresso","https://jobspresso.co/"],
+  ["Arc","https://arc.dev/remote-jobs"]
  ];
  const box=el("more-sources");
- if(box)box.innerHTML='<h4>Search more job sites</h4><p>Open these sites with your search terms pre-filled. Some may ask you to sign in.</p><div class="source-links">'+links.map(x=>'<a target="_blank" rel="noopener" href="'+x[1]+'">'+x[0]+' ↗</a>').join("")+'</div>';
-}
-function showFallbackSearches(q,loc,message){
- showExternalSearches(q,loc);
- el("result-count").textContent="No listings from connected feeds";
- el("jobs").className="empty";
- el("jobs").innerHTML='<p>'+esc(message)+'</p><p>The external job-site searches are available below.</p>';
+ if(box)box.innerHTML='<h4>Search across job websites</h4><p>These links open each platform. Some may require an account or paid membership. Check country eligibility and listing availability.</p><div class="source-links">'+links.map(x=>'<a target="_blank" rel="noopener" href="'+x[1]+'">'+x[0]+' ↗</a>').join("")+'</div>';
 }
 function experienceMatches(job,level){if(level==="any")return true;const title=(job.title||"").toLowerCase(),desc=(job.description||"").toLowerCase(),text=title+" "+desc+" "+(job.category||"")+" "+(job.tags||[]).join(" ");const patterns={ "no-experience":/no experience|no prior experience|without experience|experience not required|training provided|entry[- ]level|graduate|intern/i, internship:/intern(ship)?|trainee/i, entry:/entry[- ]level|graduate|recent graduate|new grad|no experience|junior/i, junior:/junior|0\s*[-–to]+\s*2 years|1\s*[-–to]+\s*2 years/i, associate:/associate|2\s*[-–to]+\s*4 years/i, mid:/mid[- ]level|3\s*[-–to]+\s*7 years|4\s*[-–to]+\s*6 years/i, senior:/senior|7\+? years|8\+? years|lead engineer|principal/i, manager:/manager|management|team lead|head of/i, executive:/director|executive|vice president|\\bvp\\b|chief [a-z]+ officer/i};if(patterns[level].test(text))return true;if(level==="junior"&&/entry[- ]level/.test(title))return true;if(level==="entry"&&/junior/.test(title))return true;return false}
 async function search(e){
  e.preventDefault();
- const q=el("query").value.trim(),loc=el("location").value.trim(),level=el("experience").value;
+ const q=el("query").value.trim(),loc=el("location").value.trim(),level=el("experience").value;const mode=el("work-mode")?el("work-mode").value:"any";
  if(!q&&!loc){toast("Enter a job title or location.");return}
  searches++;stats();showExternalSearches(q,loc);el("jobs").textContent="Searching connected job sources…";el("result-count").textContent="Searching";
  const getJson=async url=>{const r=await fetch(url);if(!r.ok)throw Error("HTTP "+r.status);return r.json()};
@@ -38,7 +44,8 @@ async function search(e){
   const text=[x.title,x.company,x.description,x.location,...x.tags].join(" ").replace(/<[^>]*>/g," ").toLowerCase();
   const place=(x.location||"").toLowerCase();
   const locationOK=!loc||place.includes(loc.toLowerCase())||(loc.toLowerCase()==="remote"&&x.remote)||((/worldwide|anywhere|global|all countries/i.test(place))&&x.remote);
-  return(!q||words.some(w=>text.includes(w)))&&locationOK&&experienceMatches({...x,category:x.tags.join(" ")},level);
+  const arrangement=(()=>{const combined=(x.title+" "+x.description+" "+x.location).toLowerCase();if(/hybrid|partly remote|partially remote|2-3 days in office|days in the office/.test(combined))return "hybrid";if(x.remote||/remote|work from home|work-from-home|anywhere in the world/.test(combined))return "remote";return "onsite"})();
+  return(!q||words.some(w=>text.includes(w)))&&locationOK&&(mode==="any"||arrangement===mode)&&experienceMatches({...x,category:x.tags.join(" ")},level);
  });
  el("result-count").textContent=rows.length+" matching listings · "+sourceCount+" of 3 sources connected";
  if(!rows.length){
