@@ -635,7 +635,7 @@ async function search(env, body) {
   const sources = settled.map((item, index) => ({ name: index === tasks.length - 1 ? "Wider web search" : "Job-board group " + (index + 1), status: item.status === "fulfilled" ? "connected" : "unavailable" }));
   const all = settled.flatMap(item => item.status === "fulfilled" ? item.value : []);
   const seen = new Set();
-  const candidates = all.filter(item => {
+  const uniqueCandidates = all.filter(item => {
     try {
       const url = new URL(item.url);
       url.hash = "";
@@ -650,18 +650,26 @@ async function search(env, body) {
     } catch {
       return false;
     }
-  })
-    // Do not ask the AI to rank category pages or profiles as if they were jobs.
-    .filter(item => !isSearchOrProfilePage(item))
-    .filter(item => isIndividualVacancyURL(item))
-    // Search snippets often omit the job's location. Do not discard a
-    // potentially valid vacancy until the actual employer page is inspected.
-    // Prioritise results that already mention Israel, but verify location later.
+  });
+  const individualPageCandidates = uniqueCandidates.filter(item => !isSearchOrProfilePage(item));
+  const directVacancyCandidates = individualPageCandidates.filter(item => isIndividualVacancyURL(item));
+  // Search snippets often omit the job's location. Do not discard a
+  // potentially valid vacancy until the actual employer page is inspected.
+  // Prioritise results that already mention Israel, but verify location later.
+  const candidates = directVacancyCandidates
     .sort((a, b) => {
       const israelPriority = Number(hasIsraelEvidence(b)) - Number(hasIsraelEvidence(a));
       return israelPriority || b.score - a.score;
     })
     .slice(0, 80);
+  const searchDiagnostics = {
+    searchResultsReturned: all.length,
+    uniqueResults: uniqueCandidates.length,
+    afterSearchPageAndProfileFilter: individualPageCandidates.length,
+    afterDirectVacancyUrlFilter: directVacancyCandidates.length,
+    candidatePagesSelectedForChecking: Math.min(candidates.length, 36),
+    jobBoards: sources
+  };
   let jobs;
   let pageCheckedCandidates = [];
   try {
@@ -674,6 +682,10 @@ async function search(env, body) {
         total: 0,
         candidatesReviewed: candidates.length,
         pagesChecked: Math.min(candidates.length, 36),
+        searchDiagnostics: {
+          ...searchDiagnostics,
+          verifiedIndividualVacancies: pageCheckedCandidates.length
+        },
         sources,
         generatedAt: new Date().toISOString(),
         profileSummary: "CareerFinder checked the employer pages but could not confirm enough individual vacancy descriptions. No generic job-search pages were shown."
@@ -688,7 +700,13 @@ async function search(env, body) {
   }
   const usedFallback = jobs.length > 0 && jobs[0].matchReason && jobs[0].matchReason.startsWith("Ranked using");
   return json({
-    jobs, total: jobs.length, candidatesReviewed: candidates.length, sources,
+    jobs, total: jobs.length, candidatesReviewed: candidates.length,
+    searchDiagnostics: {
+      ...searchDiagnostics,
+      verifiedIndividualVacancies: pageCheckedCandidates.length,
+      aiSelectedVacancies: jobs.length
+    },
+    sources,
     generatedAt: new Date().toISOString(),
     profileSummary: usedFallback
       ? "The AI review service was temporarily unavailable, so CareerFinder ranked the collected vacancies using your keywords and job details."
