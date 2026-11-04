@@ -417,6 +417,7 @@ async function inspectVacancyPage(targetUrl, expectedTitle) {
 
   const directorySignals = [
     /all (open )?(jobs|positions|vacancies)/,
+    /every (open )?(job|position|vacancy)/,
     /browse (jobs|opportunities)/,
     /search (jobs|open positions)/,
     /job opportunities at/,
@@ -424,9 +425,14 @@ async function inspectVacancyPage(targetUrl, expectedTitle) {
     /showing \d+[-–]\d+ of \d+/,
     /\d+ jobs? found/,
     /filter by (location|department|team|category)/,
-    /sort by (relevance|date|location)/
+    /sort by (relevance|date|location)/,
+    /positions? in .{0,80} located in/,
+    /jobs? in (human resources|finance|engineering|marketing|administration)/,
+    /after this post, you will find only expired jobs/
   ];
-  const isDirectory = directorySignals.some(pattern => pattern.test(pageTitle.toLowerCase() + " " + visible.slice(0, 3500)));
+  const directoryText = pageTitle.toLowerCase() + " " + visible.slice(0, 5000);
+  const untalentCategoryPath = /(^|\/)jobs\/in-[^/]+\//i.test(path) && /untalent\.org$/i.test(pageUrl.hostname);
+  const isDirectory = untalentCategoryPath || directorySignals.some(pattern => pattern.test(directoryText));
   const applicationOnly = /\/(apply|application|submit-application)\/?$/i.test(path)
     || /application form|submit your application|candidate application/i.test(pageTitle);
   const roleSignals = [
