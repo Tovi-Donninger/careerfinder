@@ -40,7 +40,7 @@ async function askAI(env, system, user, maxTokens = 1800) {
   const endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions";
   // Use the currently supported Gemini Flash model. Retry temporary overloads
   // instead of calling retired models or silently accepting unreviewed jobs.
-  const model = "gemini-3.8-flash";
+  const model = "gemini-3.5-flash-lite";
   const failures = [];
   for (let attempt = 0; attempt < 3; attempt++) {
     let response;
@@ -101,14 +101,14 @@ async function askAI(env, system, user, maxTokens = 1800) {
 
     const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 260);
     const retryable = response.status === 429 || [500, 502, 503, 504].includes(response.status);
-    if (!retryable) {
+    if (!retryable || (response.status === 429 && /per day|requests per day|daily quota|daily limit/i.test(detail))) {
       throw new Error("Gemini " + model + " returned HTTP " + response.status + ": " + detail);
     }
     failures.push("HTTP " + response.status + ": " + detail);
     if (attempt < 2) {
       const retryMatch = detail.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
       const delayMs = response.status === 429 && retryMatch
-        ? Math.min(12000, Math.ceil(Number(retryMatch[1]) * 1000))
+        ? Math.min(60000, Math.ceil(Number(retryMatch[1]) * 1000))
         : (attempt === 0 ? 1800 : 4500);
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
@@ -329,14 +329,16 @@ async function discoverVacancies(env, candidates, criteria) {
       }
     };
   } catch (error) {
-    // Do not lose search results if discovery is temporarily unavailable.
-    // Stage 2 still checks the full page and rejects non-vacancy pages.
+    // Preserve candidates for full-page evaluation, but do not report them as
+    // AI-approved individual vacancies. Stage 2 must independently reject
+    // directories and multi-job pages using the extracted page evidence.
     return {
       candidates,
       stats: {
         inputCandidates: candidates.length,
-        discoverySelected: candidates.length,
-        discoveryRejected: 0,
+        discoverySelected: 0,
+        discoveryRejected: candidates.length,
+        fallbackCandidatesSentToEvaluation: candidates.length,
         batches: 1,
         batchFailures: 1,
         fallbackUsed: true,
@@ -511,7 +513,7 @@ async function reviewVacancies(env, candidates, criteria) {
   for (let i = 0; i < batches.length; i++) {
     // Gemini's free tier is rate-limited. Process batches serially rather than
     // firing several simultaneous requests and exhausting the per-minute quota.
-    if (i > 0) await new Promise(resolve => setTimeout(resolve, 12000));
+    if (i > 0) await new Promise(resolve => setTimeout(resolve, 4500));
     const result = await reviewBatchWithRecovery(env, batches[i].jobs, criteria, batches[i].offset);
     selected.push(...result.jobs);
     batchStats.push(...result.stats);
