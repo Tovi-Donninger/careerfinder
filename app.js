@@ -131,10 +131,10 @@ function importChatGPTResults(){
    if(seen.has(key))return false;seen.add(key);return true;
   }).slice(0,15);
   const careers=Array.isArray(parsed.careerPaths)?parsed.careerPaths:Array.isArray(parsed.alternativeCareers)?parsed.alternativeCareers:[];
-  data.latestSearchResults=jobs;
-  data.careerIdeas=careers.slice(0,8).map(r=>({title:String(r.title||"").trim(),reason:String(r.reason||"").trim(),transferableSkills:Array.isArray(r.transferableSkills)?r.transferableSkills.map(String).slice(0,8):[],entryLevel:String(r.entryLevel||r.level||""),skillGaps:Array.isArray(r.skillGaps)?r.skillGaps.map(String).slice(0,8):[]})).filter(r=>r.title);
+  if(Array.isArray(parsed)||Array.isArray(parsed.jobs)||Array.isArray(parsed.vacancies))data.latestSearchResults=jobs;
+  if(Array.isArray(parsed.careerPaths)||Array.isArray(parsed.alternativeCareers))data.careerIdeas=careers.slice(0,8).map(r=>({title:String(r.title||"").trim(),reason:String(r.reason||"").trim(),transferableSkills:Array.isArray(r.transferableSkills)?r.transferableSkills.map(String).slice(0,8):[],entryLevel:String(r.entryLevel||r.level||""),skillGaps:Array.isArray(r.skillGaps)?r.skillGaps.map(String).slice(0,8):[]})).filter(r=>r.title);
   save();renderImportedResults();
-  toast("Imported "+jobs.length+" jobs and "+data.careerIdeas.length+" career ideas.");
+  toast("Updated "+(Array.isArray(parsed.jobs)||Array.isArray(parsed.vacancies)||Array.isArray(parsed)?jobs.length:0)+" jobs and "+(Array.isArray(parsed.careerPaths)||Array.isArray(parsed.alternativeCareers)?data.careerIdeas.length:0)+" career ideas.");
   if(!jobs.length&&!data.careerIdeas.length)throw Error("No usable jobs or career paths were found. Check that the JSON includes jobs and/or careerPaths.");
  }catch(error){toast(error.message||"Could not import that response.");}
 }
