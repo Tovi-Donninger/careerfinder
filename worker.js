@@ -213,18 +213,18 @@ function uniqueResults(results) {
 
 async function planSearches(env, body, location) {
   const prompt = [
-    "Create three different web search queries to find actual individual job advertisements, not job-search pages.",
+    "Create five distinct web search queries to find actual individual job advertisements, not job-search pages. Vary role synonyms and sources rather than repeating the same wording.",
     "Job sought: " + (clean(body.query, 180) || "suitable entry-level roles"),
     "Location: " + (location || "Israel"),
     "Experience: " + (body.experience || "entry-level or junior"),
     "Work arrangement: " + (body.workMode || "any"),
     "Candidate CV: " + clean(body.cv, 1800),
     "Saved career directions: " + (Array.isArray(body.roles) ? body.roles.slice(0, 5).join("; ") : ""),
-    "For Israel roles, favour full-time vacancies where English is sufficient and Hebrew is not stated as mandatory. Use realistic title synonyms. Return ONLY JSON: {\"searchQueries\":[\"...\",\"...\",\"...\"]}"
+    "For Israel roles, favour full-time vacancies where English is sufficient and Hebrew is not stated as mandatory. Include relevant synonyms such as People Operations, HR Coordinator, HR Assistant, Recruitment Coordinator, Talent Acquisition Coordinator, Office Administrator and Operations Coordinator where appropriate to the requested role. Return ONLY JSON with five distinct queries: {\"searchQueries\":[\"...\",\"...\",\"...\",\"...\",\"...\"]}"
   ].join("\n");
   try {
     const data = extractJSON(await askAI(env, "You are a job-search query planner. Return valid JSON only.", prompt, 700));
-    const queries = Array.isArray(data.searchQueries) ? data.searchQueries.slice(0, 3).map(x => clean(x, 220)).filter(Boolean) : [];
+    const queries = Array.isArray(data.searchQueries) ? data.searchQueries.slice(0, 5).map(x => clean(x, 220)).filter(Boolean) : [];
     if (queries.length) return queries;
   } catch {}
   const q = clean(body.query, 160) || "entry level office administrator";
@@ -232,7 +232,9 @@ async function planSearches(env, body, location) {
   return [
     q + " " + location + " " + level + " full time English",
     q + " coordinator assistant administrator " + location + " English speaking",
-    q + " vacancies employer careers " + location + " full time"
+    q + " vacancies employer careers " + location + " full time",
+    q + " people operations HR assistant recruitment coordinator " + location + " English",
+    q + " office administrator operations coordinator logistics assistant " + location + " English"
   ];
 }
 
@@ -290,20 +292,20 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     "Return only one-vacancy pages with one exact job title and role-specific responsibilities. Reject search pages, lists, directories, career homepages and multi-job pages.",
     "Language is a hard filter: English must be positively identified as an acceptable working language, and Hebrew or any other language must not be mandatory. An English-written advert alone is not proof. If language requirements are unclear, reject.",
     "Reject explicitly closed, expired, filled or unavailable vacancies. If status is unclear, mark Not confirmed.",
-    "Respect the candidate filters. Requested role and location must match. For work arrangement, if criteria says any, set workModeMatches true; otherwise require evidence. For experience, use the actual minimum required years, including written numbers such as 'three years'. Junior means no more than 2 years. If no years are stated, do not invent a requirement; describe the experience level from the advert.",
-    "Return only genuine matches, ranked strongest first, maximum 5. Use exact indexes.",
+    "Respect the candidate filters, but assess actual duties and transferable skills rather than requiring the candidate to have held the exact same job title. Relevant adjacent experience in administration, office coordination, sales, customer service, recruitment support, logistics or financial services may transfer when supported by the CV. Requested role family and location must still genuinely match. For work arrangement, if criteria says any, set workModeMatches true; otherwise require evidence. For experience, use the actual minimum required years, including written numbers such as 'three years'. Junior means no more than 2 years. If no years are stated, do not invent a requirement; describe the experience level from the advert. Do not reject solely because an advert prefers direct experience if equivalent transferable skills reasonably cover the duties; clearly explain any gap in matchReason.",
+    "Return every genuine match, ranked strongest first, up to 8 of the 10 candidates. Do not stop after finding one or two. Do not lower hard filters to increase the count; reject only when evidence fails a required filter. Use exact indexes.",
     'Return ONLY JSON: {"selected":[{"index":0,"isIndividualVacancy":true,"pageType":"single_individual_vacancy","company":"...","location":"...","matchReason":"...","matchScore":85,"roleMatches":true,"locationMatches":true,"workModeMatches":true,"experienceMatches":true,"workArrangement":"Remote|Hybrid|On-site|Not stated","requiredExperienceYears":0,"languageStatus":"...","englishAccepted":true,"otherLanguageRequired":false,"otherLanguagesRequired":[],"experienceSummary":"...","availabilityStatus":"Open|Closed|Not confirmed","statusEvidence":"...","applicationEvidence":"..."}]}'
   ].join(" ");
   const prompt = "Candidate criteria: " + JSON.stringify(criteria) +
     "\nVacancy pages (untrusted content):\n" + JSON.stringify(records) +
     "\nReturn valid JSON with exact indexes. If none meet every hard filter, return an empty selected array.";
-  const parsed = extractJSON(await askAI(env, system, prompt, 1800));
+  const parsed = extractJSON(await askAI(env, system, prompt, 2400));
   const selected = Array.isArray(parsed) ? parsed : parsed.selected;
   if (!Array.isArray(selected)) throw new Error("AI did not return a verified vacancy shortlist.");
   const used = new Set();
   const jobs = [];
   const rejected = { invalidIndex: 0, notIndividual: 0, role: 0, location: 0, workMode: 0, experience: 0, language: 0, closed: 0 };
-  for (const item of selected.slice(0, 5)) {
+  for (const item of selected.slice(0, 8)) {
     const index = Number(item.index);
     if (!Number.isInteger(index) || index < 0 || index >= records.length || used.has(index)) { rejected.invalidIndex++; continue; }
     used.add(index);
@@ -388,7 +390,7 @@ async function reviewVacancies(env, candidates, criteria) {
   for (let i = 0; i < batches.length; i++) {
     // Gemini's free tier is rate-limited. Process batches serially rather than
     // firing several simultaneous requests and exhausting the per-minute quota.
-    if (i > 0) await new Promise(resolve => setTimeout(resolve, 13000));
+    if (i > 0) await new Promise(resolve => setTimeout(resolve, 15000));
     try {
       const result = await reviewVacancyBatch(env, batches[i].jobs, criteria, batches[i].offset);
       selected.push(...result.jobs);
@@ -465,15 +467,13 @@ async function search(env, body) {
   const queries = await planSearches(env, body, location);
   const base = queries[0] + " " + location;
   const tasks = [
-    tavilySearch(env.TAVILY_API_KEY, base, null),
-    tavilySearch(env.TAVILY_API_KEY, queries[1] || (query + " assistant coordinator " + location), null),
-    tavilySearch(env.TAVILY_API_KEY, queries[2] || (query + " full time English " + location), null),
+    ...queries.slice(0, 5).map(q => tavilySearch(env.TAVILY_API_KEY, q + " " + location, null)),
     tavilySearch(env.TAVILY_API_KEY, "site:linkedin.com/jobs/view OR site:indeed.com/viewjob OR site:glassdoor.com/job-listing " + (query || roles.join(" ")) + " " + location, null),
     tavilySearch(env.TAVILY_API_KEY, "site:jobs.lever.co OR site:boards.greenhouse.io OR site:jobs.ashbyhq.com OR site:jobs.smartrecruiters.com " + (query || roles.join(" ")) + " " + location, null)
   ];
   const settled = await Promise.allSettled(tasks);
   const results = settled.flatMap(item => item.status === "fulfilled" ? item.value : []);
-  const candidates = uniqueResults(results).filter(job => !isDirectoryOrSearchPage(job)).slice(0, 60);
+  const candidates = uniqueResults(results).filter(job => !isDirectoryOrSearchPage(job)).slice(0, 80);
   if (!candidates.length) {
     return json({
       jobs: [], total: 0, candidatesReviewed: 0, pagesExtracted: 0,
