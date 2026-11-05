@@ -38,62 +38,73 @@ function extractJSON(value) {
 async function askAI(env, system, user, maxTokens = 1800) {
   if (!env.GEMINI_API_KEY) throw new Error("Gemini API key is missing. Add GEMINI_API_KEY as a Worker secret.");
   const endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions";
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-goog-api-key": env.GEMINI_API_KEY
-      },
-      body: JSON.stringify({
-        model: "gemini-3.5-flash-lite",
-        system_instruction: system,
-        input: user,
-        generation_config: {
-          max_output_tokens: maxTokens,
-          temperature: 0.1
+  const models = ["gemini-3.5-flash-lite", "gemini-3.8-flash"];
+  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
+    const model = models[modelIndex];
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": env.GEMINI_API_KEY
         },
-        store: false
-      }),
-      signal: AbortSignal.timeout(45000)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.ok) {
-      // Interactions REST responses place generated text inside
-      // steps[].content[].text (not output_text / outputs).
-      const stepText = Array.isArray(data.steps) ? data.steps
-        .filter(step => !step.type || step.type === "model_output")
-        .map(step => {
-          if (typeof step.text === "string") return step.text;
-          if (typeof step.content === "string") return step.content;
-          return Array.isArray(step.content)
-            ? step.content.map(part => typeof part === "string" ? part : (part?.text || "")).join("")
-            : "";
-        }).filter(Boolean).join("\n") : "";
-      const output = data.output_text ||
-        stepText ||
-        (Array.isArray(data.outputs) ? data.outputs.map(item =>
-          item.text || (Array.isArray(item.content) ? item.content.map(part => part.text || "").join("") : "")
-        ).join("\n") : "");
-      if (!output) {
-        const stepTypes = Array.isArray(data.steps) ? data.steps.map(step => step.type || "unknown").join(",") : "none";
-        const outputTokens = data.usage?.total_output_tokens ?? "unknown";
-        throw new Error("Gemini completed but returned no readable text (status: " + (data.status || "unknown") + ", steps: " + stepTypes + ", output tokens: " + outputTokens + ").");
+        body: JSON.stringify({
+          model,
+          system_instruction: system,
+          input: user,
+          generation_config: {
+            max_output_tokens: maxTokens,
+            temperature: 0.1
+          },
+          store: false
+        }),
+        signal: AbortSignal.timeout(45000)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        // Interactions REST responses place generated text inside
+        // steps[].content[].text (not output_text / outputs).
+        const stepText = Array.isArray(data.steps) ? data.steps
+          .filter(step => !step.type || step.type === "model_output")
+          .map(step => {
+            if (typeof step.text === "string") return step.text;
+            if (typeof step.content === "string") return step.content;
+            return Array.isArray(step.content)
+              ? step.content.map(part => typeof part === "string" ? part : (part?.text || "")).join("")
+              : "";
+          }).filter(Boolean).join("\n") : "";
+        const output = data.output_text ||
+          stepText ||
+          (Array.isArray(data.outputs) ? data.outputs.map(item =>
+            item.text || (Array.isArray(item.content) ? item.content.map(part => part.text || "").join("") : "")
+          ).join("\n") : "");
+        if (!output) {
+          const stepTypes = Array.isArray(data.steps) ? data.steps.map(step => step.type || "unknown").join(",") : "none";
+          const outputTokens = data.usage?.total_output_tokens ?? "unknown";
+          throw new Error("Gemini completed but returned no readable text (status: " + (data.status || "unknown") + ", steps: " + stepTypes + ", output tokens: " + outputTokens + ").");
+        }
+        return output;
       }
-      return output;
+      const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 300);
+      const retryable = response.status === 429 || [500, 502, 503, 504].includes(response.status);
+      if (!retryable) {
+        throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
+      }
+      // If Flash-Lite is overloaded, switch models promptly instead of
+      // spending the full retry window on an unavailable endpoint.
+      if (response.status === 503 && modelIndex === 0 && attempt >= 1) break;
+      if (attempt === 3) {
+        if (modelIndex < models.length - 1 && [500, 502, 503, 504].includes(response.status)) break;
+        throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
+      }
+      const retryMatch = detail.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
+      const delayMs = response.status === 429 && retryMatch
+        ? Math.min(60000, Math.ceil(Number(retryMatch[1]) * 1000) + 1000)
+        : Math.min(16000, 3000 * Math.pow(2, attempt));
+      await new Promise(resolve => setTimeout(resolve, delayMs));
     }
-    const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 300);
-    const retryable = response.status === 429 || [500, 502, 503, 504].includes(response.status);
-    if (!retryable || attempt === 3) {
-      throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
-    }
-    const retryMatch = detail.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
-    const delayMs = response.status === 429 && retryMatch
-      ? Math.min(60000, Math.ceil(Number(retryMatch[1]) * 1000) + 1000)
-      : Math.min(30000, 4000 * Math.pow(2, attempt));
-    await new Promise(resolve => setTimeout(resolve, delayMs));
   }
-  throw new Error("Gemini request failed after retries.");
+  throw new Error("Gemini models failed after retries.");
 }
 
 async function analyse(env, body) {
@@ -341,7 +352,7 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     "A valid individual vacancy has one exact job title, company and role-specific responsibilities. Reject search pages, lists, directories, career homepages and multi-job pages.",
     "Role: accept roles matching the requested role or one of the candidate's saved career directions, including reasonable title variations and transferable duties. Reject unrelated roles.",
     "Location: accept only if the actual work location matches the requested location. Do not infer location from company headquarters.",
-    "Work arrangement: if the requested arrangement is onsite, accept only a role explicitly based at a workplace/office/site. Remote and hybrid do NOT count as onsite. If the advert does not establish the arrangement, set workModeMatches false and explain why. Apply the same exact-match logic to remote and hybrid.",
+    "Work arrangement: when the requested arrangement is onsite, reject only if the advert explicitly states Hybrid or Remote. If the advert explicitly states office/site/on-site, classify workArrangement as On-site. If no arrangement is stated, classify it as Not stated and set workModeMatches true; it may be accepted provisionally and must be labelled 'On-site assumed — verify with employer'. Never describe an unstated arrangement as confirmed on-site. Explicit Hybrid and Remote must be rejected. For requested remote or hybrid, apply exact-match logic as before.",
     "Experience: inspect only mandatory qualifications for this role. Ignore company age, product history, unrelated dates and preferred/nice-to-have experience when determining required years. Junior means no more than 2 years of mandatory relevant experience. If no mandatory minimum is stated, requiredExperienceYears is 0. Do not reject a role just because it prefers experience if equivalent transferable skills fit.",
     "Language: reject if Hebrew or another non-English language is explicitly required, mandatory, fluent, essential, or listed as a qualification/advantage. If the advert is written in English and no other language is listed, accept provisionally and set languageStatus to 'English advert; no additional language requirement stated — verify with employer'. Do not claim English working language is confirmed unless the advert explicitly says so.",
     "Availability: reject only if the advert clearly says closed, expired, filled or no longer accepting applications. Otherwise mark Not confirmed unless there is clear evidence it is open.",
@@ -367,7 +378,14 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     if (item.isIndividualVacancy !== true || item.pageType !== "single_individual_vacancy") { rejected.notIndividual++; failed = true; }
     if (item.roleMatches !== true) { rejected.role++; failed = true; }
     if (item.locationMatches !== true) { rejected.location++; failed = true; }
-    if (criteria.workMode !== "any" && item.workModeMatches !== true) { rejected.workMode++; failed = true; }
+    const arrangement = clean(item.workArrangement, 60).toLowerCase();
+    const requestedOnsite = /on.?site|office|workplace/.test(String(criteria.workMode || "").toLowerCase());
+    const explicitlyRemote = /remote/.test(arrangement);
+    const explicitlyHybrid = /hybrid/.test(arrangement);
+    if (requestedOnsite ? (explicitlyRemote || explicitlyHybrid) : (criteria.workMode !== "any" && item.workModeMatches !== true)) {
+      rejected.workMode++;
+      failed = true;
+    }
     if (item.experienceMatches !== true || !experienceFits({
       title: job.title,
       experienceSummary: item.experienceSummary,
@@ -389,6 +407,9 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
       matchReason: clean(item.matchReason, 240) || "Matched against the extracted vacancy details.",
       matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 50))),
       languageStatus: clean(item.languageStatus, 140) || "English suitability not confirmed",
+      workArrangement: requestedOnsite
+        ? (explicitlyRemote || explicitlyHybrid ? clean(item.workArrangement, 60) : (/on.?site|office|workplace/.test(arrangement) ? "On-site" : "On-site assumed — verify with employer"))
+        : (clean(item.workArrangement, 60) || "Not stated"),
       experienceSummary: clean(item.experienceSummary, 220) || "See vacancy details",
       requiredExperienceYears: Number.isFinite(Number(item.requiredExperienceYears)) ? Number(item.requiredExperienceYears) : null,
       availabilityStatus,
