@@ -306,8 +306,16 @@ async function verifyLiveVacancy(job) {
     if (finalHost !== originalHost && /google\.|bing\.|indeed\.|linkedin\./i.test(finalHost)) return null;
     const html = await response.text();
     const liveText = clean(html, 100000);
-    if (pageClearlyClosed(liveText) || !pageHasApplySignal(liveText)) return null;
-    return { ...job, url: finalUrl, availabilityStatus: "Live vacancy page checked · application option present" };
+    if (pageClearlyClosed(liveText)) return null;
+    // Some legitimate ATS pages render Apply controls with JavaScript; absence
+    // from raw HTML is not proof that the vacancy is closed.
+    return {
+      ...job,
+      url: finalUrl,
+      availabilityStatus: pageHasApplySignal(liveText)
+        ? "Live vacancy page checked · application option present"
+        : "Vacancy page reachable · application status not confirmed"
+    };
   } catch {
     return null;
   }
@@ -339,11 +347,24 @@ async function reviewVacancies(env, candidates, criteria) {
   return liveChecks.sort((a, b) => b.matchScore - a.matchScore).slice(0, 15);
 }
 
+function explicitExperienceYears(text) {
+  const source = String(text || "").toLowerCase();
+  const wordNumbers = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+  const number = "(\\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten)";
+  const range = new RegExp("(?:at least |minimum of |minimum |more than |over |no less than )?" + number + "\\s*(?:-|to)\\s*" + number + "\\s*(?:years?|yrs?)", "g");
+  const single = new RegExp("(?:at least |minimum of |minimum |more than |over |no less than )?" + number + "\\s*\\+?\\s*(?:years?|yrs?)(?: of (?:relevant |professional )?experience)?", "g");
+  const asNumber = value => wordNumbers[value] || Number(value);
+  const values = [];
+  for (const match of source.matchAll(range)) values.push(asNumber(match[1]));
+  for (const match of source.matchAll(single)) values.push(asNumber(match[1]));
+  return values.filter(Number.isFinite);
+}
+
 function experienceFits(job, level) {
   if (!level || level === "any") return true;
   const title = clean(job.title, 200).toLowerCase();
   const text = (title + " " + clean(job.description, 10000) + " " + clean(job.experienceSummary, 500)).toLowerCase();
-  const explicitYears = [...text.matchAll(/(?:at least |minimum of |minimum |over |more than )?(\d{1,2})\s*\+?\s*(?:years?|yrs?)(?: of experience)?/g)].map(m => Number(m[1]));
+  const explicitYears = explicitExperienceYears(text);
   const aiYears = Number.isFinite(Number(job.requiredExperienceYears)) ? Number(job.requiredExperienceYears) : 0;
   const requiredYears = Math.max(aiYears, ...(explicitYears.length ? explicitYears : [0]));
   const seniorSignals = /\b(senior|lead|principal|head of|director|chief|vice president|vp)\b/.test(title);
