@@ -478,7 +478,20 @@ async function reviewBatchWithRecovery(env, jobs, criteria, offset, depth = 0) {
     // failed batch as smaller pieces; successful normal batches stay fast.
     const canSplit = /incomplete JSON|did not return vacancy evaluations|did not return JSON/i.test(message)
       && jobs.length > 5 && depth < 2;
-    if (!canSplit) return { jobs: [], stats: [{ error: message }] };
+    if (!canSplit) return {
+      jobs: [],
+      stats: [{
+        error: message,
+        // Keep the discovered vacancy links in the response so a failed AI
+        // evaluation does not erase the discovery work.
+        unreviewedCandidates: jobs.map(job => ({
+          title: clean(job.title, 180),
+          company: clean(job.company, 120),
+          url: clean(job.url, 1000),
+          source: clean(job.source, 120)
+        }))
+      }]
+    };
     const midpoint = Math.ceil(jobs.length / 2);
     const left = jobs.slice(0, midpoint);
     const right = jobs.slice(midpoint);
@@ -515,13 +528,14 @@ async function reviewVacancies(env, candidates, criteria) {
   }
   return {
     jobs: liveChecks.sort((a, b) => b.matchScore - a.matchScore).slice(0, 15),
+    unreviewedCandidates: batchStats.flatMap(item => item.unreviewedCandidates || []),
     reviewStats: {
       batches: batchStats.length,
       batchFailures,
       aiSelected: batchStats.reduce((sum, x) => sum + (x.aiSelected || 0), 0),
       acceptedBeforeLiveCheck: selected.length,
       passedLiveCheck: liveChecks.length,
-      batchDetails: batchStats
+      batchDetails: batchStats.map(({ unreviewedCandidates, ...item }) => item)
     }
   };
 }
@@ -626,6 +640,7 @@ async function search(env, body) {
       jobs,
       discoveryStats: discovery.stats,
       reviewStats: review.reviewStats,
+      unreviewedCandidates: review.unreviewedCandidates,
       total: jobs.length,
       candidatesReviewed: candidates.length,
       discoveryCandidates: discovery.candidates.length,
