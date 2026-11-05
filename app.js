@@ -145,66 +145,6 @@ function prepareCareerPrompt(){
  const prompt=["Act as a practical career strategist helping me identify realistic alternative career paths in Israel.","My goal is to identify roles beyond traditional HR that use my transferable skills and can be entered without fluent Hebrew. English-speaking workplace is essential; reject roles that require Hebrew or another non-English language.","My background: BCom and Honours in Human Resource Management; office manager and salesperson; financial adviser experience in insurance, investments, client acquisition, financial needs analysis, compliance and relationship building; telesales experience. I have no direct HR employment experience.","Analyse the CV below. Suggest 8-12 realistic career paths, prioritising junior/entry-level roles and opportunities where my existing skills count. Include job titles to search, why I could fit, transferable skills, likely entry level, skill gaps and a short plan to become more competitive.","Also suggest adjacent sectors and less obvious career directions. Be honest about roles that are unrealistic without extra training.","Return strict JSON only with this shape: "+JSON.stringify({careerPaths:[{title:"",reason:"",transferableSkills:[""],entryLevel:"",skillGaps:[""]}],searchNotes:""}),"CV / experience:\n"+cv].join("\n\n");
  showChatGPTWorkflow(prompt);el("result-count").textContent="Career exploration prompt ready";toast("Career exploration prompt prepared.");
 }
-const catalog=[["Sales Development Representative",["sales","customer","client","communication","lead","prospecting","negotiation","crm"],"Uses communication and commercial skills to identify and develop customer opportunities."],["Customer Success Associate",["customer","client","support","communication","relationship","account","service"],"A direction for people who enjoy helping customers and building long-term relationships."],["Recruitment Coordinator",["recruitment","human resources","hr","interview","candidate","people","administration"],"Combines organisation and people skills to coordinate hiring and candidate experiences."],["Operations Coordinator",["operations","process","logistics","coordination","planning","administration","supply chain"],"Uses planning and coordination to keep teams and processes moving."],["Office Administrator",["administration","office","organise","scheduling","documents","data entry","management"],"A practical route for people with office, scheduling and organisational experience."],["Project Coordinator",["project","planning","coordination","deadline","stakeholder","reporting","communication"],"Builds on organising tasks, communicating and keeping deadlines on track."],["Marketing Coordinator",["marketing","social media","content","campaign","writing","research","analytics"],"Connects communication and research strengths with campaigns and content."],["Business Development Associate",["business development","sales","partnership","client","negotiation","strategy"],"A route for commercially minded candidates who enjoy finding opportunities."],["Junior Data Analyst",["excel","data","analysis","reporting","sql","statistics","research","spreadsheet"],"May suit candidates with analytical and reporting skills; technical gaps may need training."],["Logistics Coordinator",["logistics","shipping","inventory","warehouse","export","import","supply chain"],"Uses attention to detail and coordination in supply-chain operations."],["Financial Services Associate",["finance","financial","investment","insurance","compliance","advice","budget"],"Uses financial-services knowledge, detail and client communication."],["HR Assistant",["human resources","hr","payroll","employee","onboarding","recruitment","people"],"An entry route into people operations, especially with admin and communication strengths."],["Technical Support Specialist",["technical support","troubleshooting","software","it","customer support","problem solving"],"Combines structured problem-solving with clear user communication."]];let cvLoadingTimer=null;
-function showCVLoading(){
- const box=el("matches");
- box.className="panel cv-loading";
- box.setAttribute("aria-live","polite");
- box.innerHTML='<div class="loading-orbit" aria-hidden="true"><span class="orbit-dot"></span><span class="orbit-core">C</span></div><div class="loading-copy"><span class="loading-eyebrow">CAREERFINDER AI · CV ASSESSMENT</span><h4>Finding the strengths in your experience</h4><p id="cv-loading-stage">Preparing your CV for assessment…</p><div class="loading-track" role="progressbar" aria-label="CV assessment progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="10"><span id="cv-loading-progress"></span></div><div class="loading-steps"><span class="active" data-cv-step="0"><i>01</i> Read CV</span><span data-cv-step="1"><i>02</i> Identify skills</span><span data-cv-step="2"><i>03</i> Match experience</span><span data-cv-step="3"><i>04</i> Suggest careers</span></div><small class="loading-footnote">Your CV is being assessed. The final analysis can take a little longer; this indicator will keep updating while we wait.</small><small id="cv-loading-clock" class="loading-footnote">Elapsed: 0:00</small></div>';
- const stages=[
-  {label:"Preparing your CV for assessment…",progress:12},
-  {label:"Identifying your education and professional strengths…",progress:30},
-  {label:"Finding transferable skills from your experience…",progress:48},
-  {label:"Reviewing your work history and achievements…",progress:65},
-  {label:"Matching your background to realistic career paths…",progress:78},
-  {label:"Checking that suggested roles fit your experience…",progress:88},
-  {label:"Organising your skills and qualifications…",progress:93},
-  {label:"Finishing your personalised career suggestions…",progress:96}
- ];
- let stage=0,elapsed=0;
- const update=()=>{
-  const line=el("cv-loading-stage"),bar=el("cv-loading-progress"),track=box.querySelector('[role="progressbar"]');
-  if(line)line.textContent=stages[stage].label;
-  if(bar)bar.style.width=stages[stage].progress+"%";
-  if(track)track.setAttribute("aria-valuenow",String(stages[stage].progress));
-  const active=stage<1?0:stage<3?1:stage<5?2:3;
-  box.querySelectorAll("[data-cv-step]").forEach(node=>{node.classList.toggle("active",Number(node.dataset.cvStep)===active);node.classList.toggle("done",Number(node.dataset.cvStep)<active)});
-  const clock=el("cv-loading-clock");
-  if(clock)clock.textContent="Elapsed: "+Math.floor(elapsed/60)+":"+String(elapsed%60).padStart(2,"0");
- };
- update();
- if(cvLoadingTimer)clearInterval(cvLoadingTimer);
- cvLoadingTimer=setInterval(()=>{
-  elapsed++;
-  if(stage<stages.length-1)stage++;
-  else stage=5+((stage-5+1)%3);
-  update();
- },3500);
-}
-function stopCVLoading(){if(cvLoadingTimer){clearInterval(cvLoadingTimer);cvLoadingTimer=null}}
-async function matchCV(){
- const cv=el("cv").value.trim();
- if(cv.length<40){toast("Add more CV or experience detail first.");return}
- data.cv=cv;save();
- const button=el("analyse");button.disabled=true;button.textContent="Assessing your CV…";
- showCVLoading();
- try{
-  const response=await fetch("https://careerfinder-search.tovidonninger.workers.dev/api/analyse",{
-   method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},
-   body:JSON.stringify({cv})
-  });
-  const result=await response.json();
-  if(!response.ok)throw Error(result.error||"CV analysis failed.");
-  const skills=(result.keySkills||[]).map(x=>'<span class="skill-chip">'+esc(x)+'</span>').join("");
-  const education=(result.education||[]).map(x=>'<li>'+esc(x)+'</li>').join("");
-  const roles=result.careerSuggestions||[];
-  el("matches").className="panel";
-  el("matches").innerHTML='<small>AI CAREER ANALYSIS</small><h3>Your experience, translated into opportunities</h3><p>'+esc(result.profileSummary||"Your CV has been analysed.")+'</p>'+(education?'<h4>Education identified</h4><ul class="ai-list">'+education+'</ul>':'')+(skills?'<h4>Key skills</h4><div class="skill-chips">'+skills+'</div>':'')+'<h4>Suggested career directions</h4>'+roles.map(r=>'<article class="role"><h4>'+esc(r.title)+'</h4><p>'+esc(r.reason)+'</p><small>'+esc(r.level||"Suggested direction")+'</small><div class="role-actions"><button data-role="'+esc(r.title)+'">Save career</button> <button data-role-search="'+esc(r.searchTerms||r.title)+'">Find matching jobs →</button></div></article>').join("");
-  toast("AI career analysis complete.");
- }catch(error){
-  el("matches").className="panel empty";el("matches").innerHTML='<h3>AI analysis could not be completed</h3><p>'+esc(error.message)+'</p><p>Your CV remains saved in this browser. Please try again.</p>';
- }finally{stopCVLoading();button.disabled=false;button.textContent="Analyse my experience →"}
-}
 function renderApps(){
  let box=el("applications");
  if(!data.apps.length){box.className="empty";box.textContent="No applications tracked yet. Add a job above or track one from search results.";return}
