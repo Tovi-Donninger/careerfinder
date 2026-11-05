@@ -628,6 +628,196 @@ async function search(env, body) {
   }
 }
 
+
+// New experimental search engine: AI-generated search prompt + Gemini Google Search Grounding.
+// This endpoint is deliberately separate from /api/search so the existing site remains untouched.
+function interactionText(data) {
+  const steps = Array.isArray(data.steps) ? data.steps : [];
+  const modelSteps = steps.filter(step => step.type === "model_output");
+  const textParts = modelSteps.flatMap(step => Array.isArray(step.content)
+    ? step.content.filter(part => typeof part.text === "string")
+    : []);
+  const output = textParts.map(part => part.text).join("\n") || data.output_text || "";
+  const citations = [];
+  for (const part of textParts) {
+    for (const annotation of (Array.isArray(part.annotations) ? part.annotations : [])) {
+      if (annotation.type === "url_citation" && /^https?:\/\//i.test(annotation.url || "")) {
+        citations.push({ url: annotation.url, title: clean(annotation.title || "", 180) });
+      }
+    }
+  }
+  return { output, citations };
+}
+
+async function gemini25(env, input, useGoogleSearch, maxTokens = 7000) {
+  if (!env.GEMINI_API_KEY) throw new Error("Gemini API key is missing. Add GEMINI_API_KEY as a Worker secret.");
+  const body = {
+    model: "gemini-2.5-flash",
+    input,
+    generation_config: { max_output_tokens: maxTokens, temperature: 0.1 },
+    store: false
+  };
+  if (useGoogleSearch) body.tools = [{ type: "google_search" }];
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-goog-api-key": env.GEMINI_API_KEY },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(useGoogleSearch ? 90000 : 30000)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error("Gemini 2.5 Flash returned HTTP " + response.status + ": " +
+      clean(data.error?.message || data.message || "Unknown API error", 260));
+  }
+  const result = interactionText(data);
+  if (!result.output) throw new Error("Gemini returned no readable text.");
+  return result;
+}
+
+function buildCareerFinderCriteria(body) {
+  const query = clean(body.query, 180);
+  const requestedLocation = clean(body.location, 120);
+  const location = !requestedLocation || /^isreal$/i.test(requestedLocation) ? "Israel" : requestedLocation;
+  const roles = Array.isArray(body.roles) ? body.roles.slice(0, 5).map(x => clean(x, 100)).filter(Boolean) : [];
+  return {
+    query: query || roles.join(", ") || "Suitable entry-level professional roles",
+    location,
+    experience: clean(body.experience, 40) || "any",
+    workMode: (clean(body.workMode, 30) || "any").toLowerCase(),
+    language: clean(body.searchLanguage, 40) || "English",
+    savedCareerRoles: roles,
+    candidateBackground: clean(body.cv, 1800)
+  };
+}
+
+async function searchV2(env, body) {
+  const criteria = buildCareerFinderCriteria(body);
+  if (!criteria.query && !criteria.candidateBackground) {
+    return json({ error: "Enter a job title, location or CV before searching." }, 400);
+  }
+
+  try {
+    // Call 1: have AI translate the website filters into a precise web-search instruction.
+    const promptBuilderSystem = [
+      "You are a search-strategy writer for a job vacancy search engine.",
+      "Convert the supplied structured candidate criteria into one precise, detailed web-search prompt.",
+      "The prompt must instruct the next AI to search the live web for up to 15 current, individual job vacancies.",
+      "Prioritise direct employer career pages and individual ATS vacancy pages; include other reputable job boards only when they link to one specific vacancy.",
+      "Search for actual roles, not job-search pages, directories, category pages, recruitment agency lists or company homepages.",
+      "Respect every supplied hard requirement. English only: reject any vacancy that explicitly requires Hebrew or another non-English language.",
+      "For on-site preference: accept explicitly on-site roles and roles where arrangement is unstated (label the latter 'On-site assumed — verify with employer'); reject explicitly hybrid or remote roles.",
+      "For experience, distinguish mandatory requirements from preferred qualifications. Do not invent requirements.",
+      "Do not invent vacancies, companies, links, application status or evidence. Return only the search prompt, not job results."
+    ].join(" ");
+    const promptBuild = await gemini25(env,
+      promptBuilderSystem + "\n\nCandidate criteria:\n" + JSON.stringify(criteria) +
+      "\n\nWrite the search prompt now.", false, 1300);
+    const generatedPrompt = clean(promptBuild.output, 6500);
+    if (generatedPrompt.length < 100) throw new Error("AI search prompt was too short to use.");
+
+    // Call 2: Gemini itself performs Google Search and returns structured vacancy candidates.
+    const groundedSystem = [
+      "You are CareerFinder, an evidence-based live job-search assistant. You MUST use Google Search to find current vacancies.",
+      "Search the web broadly and intelligently using multiple queries. Search employer career sites and individual job pages, not just snippets.",
+      "Return up to 15 of the strongest matching individual vacancies. Never pad the list: return fewer if fewer can be evidenced.",
+      "Every result must be one specific job with one title, one employer and one direct vacancy page URL. Never return search result pages, job directories, category pages, recruitment agency lists or company homepages.",
+      "Use only information supported by search evidence. Do not invent URLs, descriptions, language requirements, experience, work arrangement or availability.",
+      "Reject any role explicitly requiring Hebrew or another non-English language. An English advert with no other language requirement may pass provisionally; say the working language should be confirmed.",
+      "If the requested arrangement is on-site, reject explicit remote and hybrid roles. If arrangement is unstated, it may pass but label 'On-site assumed — verify with employer'. Explicit office/site/on-site roles may be labelled 'On-site'.",
+      "Apply the requested location and experience level. Treat mandatory experience differently from preferred experience.",
+      "Only mark availability 'Confirmed open' if the page or current listing provides evidence it is accepting applications. Otherwise use 'Not confirmed'.",
+      "Provide a direct individual vacancy URL. Prefer an application URL only if it is clearly the application page for that exact vacancy.",
+      "Return ONLY valid JSON, no markdown, in this exact shape: {\"jobs\":[{\"title\":\"\",\"company\":\"\",\"location\":\"\",\"description\":\"short evidence-based summary\",\"url\":\"https://...\",\"matchReason\":\"\",\"matchScore\":0,\"experienceSummary\":\"mandatory experience evidence\",\"requiredExperienceYears\":0,\"languageStatus\":\"\",\"workArrangement\":\"On-site|Hybrid|Remote|Not stated|On-site assumed — verify with employer\",\"availabilityStatus\":\"Confirmed open|Not confirmed\",\"statusEvidence\":\"\",\"applicationEvidence\":\"\"}]}. Include no other keys."
+    ].join(" ");
+    const grounded = await gemini25(env,
+      groundedSystem + "\n\nSearch instruction generated from the website criteria:\n" + generatedPrompt +
+      "\n\nReturn the verified vacancy candidates as JSON.", true, 8000);
+    const parsed = extractJSON(grounded.output);
+    const rawJobs = Array.isArray(parsed.jobs) ? parsed.jobs.slice(0, 25) : [];
+    const citationUrls = new Set(grounded.citations.map(item => normaliseUrl(item.url)));
+    const candidates = [];
+    const seen = new Set();
+    for (const item of rawJobs) {
+      const url = clean(item.url, 1000);
+      if (!/^https?:\/\//i.test(url)) continue;
+      if (isDirectoryOrSearchPage({ url, title: item.title })) continue;
+      const key = normaliseUrl(url);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push({
+        title: clean(item.title, 180),
+        company: clean(item.company, 120),
+        location: clean(item.location, 120),
+        description: clean(item.description, 1800),
+        url,
+        source: (() => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "Web search"; } })(),
+        matchReason: clean(item.matchReason, 260),
+        matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 50))),
+        experienceSummary: clean(item.experienceSummary, 250),
+        requiredExperienceYears: Number.isFinite(Number(item.requiredExperienceYears)) ? Number(item.requiredExperienceYears) : 0,
+        languageStatus: clean(item.languageStatus, 180),
+        workArrangement: clean(item.workArrangement, 80) || "Not stated",
+        availabilityStatus: clean(item.availabilityStatus, 60) || "Not confirmed",
+        statusEvidence: clean(item.statusEvidence, 220),
+        applicationEvidence: clean(item.applicationEvidence, 220),
+        groundedCitation: citationUrls.has(key)
+      });
+    }
+
+    // Deterministic hard-filter checks after AI search, then live-link checks.
+    const filtered = candidates.filter(job => {
+      if (!job.title || !job.company || !job.location || !job.description) return false;
+      if (/hebrew|fluent in hebrew|required hebrew|native hebrew/i.test(job.languageStatus)) return false;
+      if (criteria.workMode.match(/on.?site|office|workplace/)) {
+        if (/^(hybrid|remote)$/i.test(job.workArrangement)) return false;
+        if (/^not stated$/i.test(job.workArrangement)) job.workArrangement = "On-site assumed — verify with employer";
+      }
+      if (criteria.experience === "entry" && job.requiredExperienceYears > 1) return false;
+      if (criteria.experience === "junior" && job.requiredExperienceYears > 2) return false;
+      if (criteria.experience === "no-experience" && job.requiredExperienceYears > 0) return false;
+      return true;
+    });
+    const live = await Promise.all(filtered.slice(0, 20).map(verifyLiveVacancy));
+    const jobs = live.filter(Boolean).slice(0, 15).map(job => ({
+      title: job.title,
+      company: job.company,
+      location: job.location,
+      description: job.description,
+      url: job.url,
+      source: job.source,
+      matchReason: job.matchReason || "Selected by Gemini using live web-search evidence.",
+      matchScore: job.matchScore,
+      languageStatus: job.languageStatus || "English advert; confirm working language with employer",
+      workArrangement: job.workArrangement,
+      experienceSummary: job.experienceSummary,
+      requiredExperienceYears: job.requiredExperienceYears,
+      availabilityStatus: job.availabilityStatus === "Confirmed open" && job.statusEvidence
+        ? "Confirmed open · live page checked"
+        : job.availabilityStatus === "Live vacancy page checked · application option present"
+          ? job.availabilityStatus : "Availability not confirmed",
+      statusEvidence: job.statusEvidence,
+      applicationEvidence: job.applicationEvidence,
+      groundedCitation: job.groundedCitation
+    }));
+    return json({
+      jobs,
+      total: jobs.length,
+      candidatesReviewed: rawJobs.length,
+      pagesExtracted: 0,
+      searchEngine: "Gemini 2.5 Flash + Google Search Grounding",
+      promptGenerated: true,
+      groundedSources: grounded.citations.length,
+      profileSummary: "Gemini created a tailored search prompt, searched the web using Google Search Grounding, and returned " +
+        rawJobs.length + " vacancy candidates. " + filtered.length + " passed initial checks and " +
+        jobs.length + " passed live page checks. Results are limited to individual vacancy links; availability is confirmed only when supported by page evidence.",
+      generatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    return json({ error: "AI web search could not be completed: " + clean(error.message || error, 260) }, 502);
+  }
+}
+
+
 export default {
   async fetch(request, env) {
     try {
@@ -638,7 +828,7 @@ export default {
       }
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/") {
-        return json({ status: "online", service: "CareerFinder AI job search", endpoints: ["/api/analyse", "/api/search"] });
+        return json({ status: "online", service: "CareerFinder AI job search", endpoints: ["/api/analyse", "/api/search", "/api/search-v2"] });
       }
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
       let body;
@@ -646,6 +836,7 @@ export default {
       catch { return json({ error: "Invalid JSON request." }, 400); }
       if (url.pathname === "/api/analyse") return await analyse(env, body);
       if (url.pathname === "/api/search") return await search(env, body);
+      if (url.pathname === "/api/search-v2") return await searchV2(env, body);
       return json({ error: "Not found." }, 404);
     } catch (error) {
       return json({ error: "Worker request failed: " + clean(error.message || error, 260) }, 500);
