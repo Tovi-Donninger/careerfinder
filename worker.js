@@ -241,7 +241,7 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     "The final URL must be the direct page for the selected job, not a search query, company profile, job-board results page, or generic employer careers page. Never return a recruitment website's homepage or search page as a vacancy link.",
     "Language is a strict pass/fail requirement. The requested search language is English. Select a vacancy only when the extracted page gives positive evidence that English is an acceptable working language for the role. Reject it if Hebrew or ANY other language is required, even alongside English. A page written in English is NOT by itself proof that English is an acceptable working language. If the language requirement is missing or unclear, reject the vacancy rather than guessing.",
     "Reject vacancies explicitly marked closed, expired, filled, unavailable, not accepting applications, or whose application deadline has passed. Check the full extracted text, including notices in other languages. Do not infer that a job is open merely because the page exists or has an Apply button. If closure status is unclear, mark 'Not confirmed'.",
-    "Apply every selected filter as a strict pass/fail rule. If a filter is set to any, set its corresponding match boolean to true. The user-selected job title/keywords must describe the actual vacancy duties, not merely appear incidentally. The vacancy location must match the requested location; if the requested location is a country, the job must be in that country. The work arrangement must match the requested remote, hybrid or onsite choice. The experience requirement must fit the selected level; do not infer eligibility from a junior-sounding title if the advert requires more experience. If evidence for any active selected filter is missing or unclear, reject the vacancy.",
+    "Apply the selected filters accurately. If a filter is set to any, its match boolean must be true. The actual role duties must match the requested title/keywords and the location must match the requested place. If remote, hybrid or onsite is specifically selected, require clear evidence of that arrangement; otherwise do not reject a job because its arrangement is unstated. For experience filters, reject only when the advert explicitly requires more experience or a higher level than selected, or the title is clearly more senior; do not reject a suitable role solely because the advert does not state a number of years. Do not assume a role is entry-level from its title alone. Set each match boolean based on evidence, not guesswork."
     "Return only genuine matches, ranked strongest first. Return no more than 5. Copy exact input indexes.",
     'Return ONLY valid JSON: {"selected":[{"index":0,"isIndividualVacancy":true,"pageType":"single_individual_vacancy","company":"...","location":"...","matchReason":"...","matchScore":85,"roleMatches":true,"locationMatches":true,"workModeMatches":true,"experienceMatches":true,"workArrangement":"Remote|Hybrid|On-site|Not stated","requiredExperienceYears":0,"languageStatus":"English accepted; no additional language required","englishAccepted":true,"otherLanguageRequired":false,"otherLanguagesRequired":[],"experienceSummary":"...","availabilityStatus":"Open|Closed|Not confirmed","statusEvidence":"short exact evidence or empty","applicationEvidence":"short exact evidence or empty"}]}'
   ].join(" ");
@@ -284,6 +284,33 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
   }).filter(Boolean);
 }
 
+async function verifyLiveVacancy(job) {
+  try {
+    const response = await fetch(job.url, {
+      method: "GET",
+      redirect: "follow",
+      headers: {
+        "Accept": "text/html,application/xhtml+xml",
+        "User-Agent": "Mozilla/5.0 (compatible; CareerFinderVacancyCheck/1.0)"
+      },
+      signal: AbortSignal.timeout(9000)
+    });
+    if (!response.ok || response.status === 404 || response.status === 410) return null;
+    const finalUrl = response.url || job.url;
+    let finalHost = "";
+    try { finalHost = new URL(finalUrl).hostname.replace(/^www\\./, "").toLowerCase(); } catch { return null; }
+    let originalHost = "";
+    try { originalHost = new URL(job.url).hostname.replace(/^www\\./, "").toLowerCase(); } catch { return null; }
+    if (finalHost !== originalHost && /google\\.|bing\\.|indeed\\.|linkedin\\./i.test(finalHost)) return null;
+    const html = await response.text();
+    const liveText = clean(html, 30000);
+    if (pageClearlyClosed(liveText) || !pageHasApplySignal(liveText)) return null;
+    return { ...job, url: finalUrl, availabilityStatus: "Live vacancy page checked · application option present" };
+  } catch {
+    return null;
+  }
+}
+
 async function reviewVacancies(env, candidates, criteria) {
   const batches = [];
   for (let i = 0; i < candidates.length; i += 6) {
@@ -300,28 +327,33 @@ async function reviewVacancies(env, candidates, criteria) {
   }
   const filtered = selected.filter(job => experienceFits(job, criteria.experience));
   if (!filtered.length) return [];
-  return filtered.sort((a, b) => b.matchScore - a.matchScore).slice(0, 15);
+  const ranked = filtered.sort((a, b) => b.matchScore - a.matchScore);
+  const liveChecks = [];
+  for (let i = 0; i < ranked.length; i += 10) {
+    const wave = ranked.slice(i, i + 10);
+    const checked = await Promise.all(wave.map(verifyLiveVacancy));
+    liveChecks.push(...checked.filter(Boolean));
+  }
+  return liveChecks.sort((a, b) => b.matchScore - a.matchScore).slice(0, 15);
 }
 
 function experienceFits(job, level) {
   if (!level || level === "any") return true;
   const title = clean(job.title, 200).toLowerCase();
-  const text = (title + " " + clean(job.description, 1400)).toLowerCase();
-  const years = [...text.matchAll(/(?:at least |minimum of |minimum |over |more than )?(\d{1,2})\s*\+?\s*(?:years?|yrs?)(?: of experience)?/g)].map(m => Number(m[1]));
+  const text = (title + " " + clean(job.description, 1800)).toLowerCase();
+  const years = [...text.matchAll(/(?:at least |minimum of |minimum |over |more than )?(\\d{1,2})\\s*\\+?\\s*(?:years?|yrs?)(?: of experience)?/g)].map(m => Number(m[1]));
   const maxYears = years.length ? Math.max(...years) : 0;
-  const explicitNoExperience = /no experience (?:required|needed|necessary)|without (?:prior |previous )?experience|experience not required|training provided|entry[- ]level|graduate role|recent graduate/i.test(text);
-  const seniorSignals = /\b(senior|lead|principal|head of|director|chief|vice president|vp)\b/.test(title);
-  const managerSignals = /\b(manager|management|team lead|head of)\b/.test(title);
-  const juniorSignals = /\b(junior|assistant|trainee|intern|graduate|entry[- ]level|coordinator)\b/.test(title);
+  const seniorSignals = /\\b(senior|lead|principal|head of|director|chief|vice president|vp)\\b/.test(title);
+  const managerSignals = /\\b(manager|management|team lead|head of)\\b/.test(title);
   if (level === "no-experience") return maxYears === 0 && !seniorSignals && !managerSignals;
-  if (level === "internship") return /intern(ship)?|trainee/i.test(text);
+  if (level === "internship") return /intern(ship)?|trainee/i.test(title);
   if (level === "entry") return maxYears <= 1 && !seniorSignals && !managerSignals;
   if (level === "junior") return maxYears <= 2 && !seniorSignals && !managerSignals;
-  if (level === "associate") return /\bassociate\b/i.test(title) && maxYears <= 4 && !seniorSignals;
-  if (level === "mid") return /\b(mid[- ]level|experienced|specialist)\b/i.test(title) && maxYears >= 3 && maxYears <= 7 && !seniorSignals;
+  if (level === "associate") return maxYears <= 4 && !seniorSignals && !managerSignals;
+  if (level === "mid") return maxYears <= 7 && !seniorSignals && !managerSignals;
   if (level === "senior") return seniorSignals || maxYears >= 7;
   if (level === "manager") return managerSignals;
-  if (level === "executive") return /\b(director|executive|vice president|vp|chief)\b/i.test(title);
+  if (level === "executive") return /\\b(director|executive|vice president|vp|chief)\\b/i.test(title);
   return true;
 }
 
