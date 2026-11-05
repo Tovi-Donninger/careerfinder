@@ -276,7 +276,9 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
       matchReason: clean(item.matchReason, 240) || "Matched against the extracted vacancy details.",
       matchScore: Math.max(1, Math.min(100, Math.round(Number(item.matchScore) || 50))),
       languageStatus: clean(item.languageStatus, 100) || "English suitability not confirmed",
-      experienceSummary: clean(item.experienceSummary, 140) || "See vacancy details",
+      experienceSummary: clean(item.experienceSummary, 180) || "See vacancy details",
+      requiredExperienceYears: Number.isFinite(Number(item.requiredExperienceYears)) && Number(item.requiredExperienceYears) >= 0
+        ? Number(item.requiredExperienceYears) : null,
       availabilityStatus,
       statusEvidence: clean(item.statusEvidence, 180),
       applicationEvidence: clean(item.applicationEvidence, 180)
@@ -340,18 +342,19 @@ async function reviewVacancies(env, candidates, criteria) {
 function experienceFits(job, level) {
   if (!level || level === "any") return true;
   const title = clean(job.title, 200).toLowerCase();
-  const text = (title + " " + clean(job.description, 1800)).toLowerCase();
-  const years = [...text.matchAll(/(?:at least |minimum of |minimum |over |more than )?(\d{1,2})\s*\+?\s*(?:years?|yrs?)(?: of experience)?/g)].map(m => Number(m[1]));
-  const maxYears = years.length ? Math.max(...years) : 0;
+  const text = (title + " " + clean(job.description, 10000) + " " + clean(job.experienceSummary, 500)).toLowerCase();
+  const explicitYears = [...text.matchAll(/(?:at least |minimum of |minimum |over |more than )?(\d{1,2})\s*\+?\s*(?:years?|yrs?)(?: of experience)?/g)].map(m => Number(m[1]));
+  const aiYears = Number.isFinite(Number(job.requiredExperienceYears)) ? Number(job.requiredExperienceYears) : 0;
+  const requiredYears = Math.max(aiYears, ...(explicitYears.length ? explicitYears : [0]));
   const seniorSignals = /\b(senior|lead|principal|head of|director|chief|vice president|vp)\b/.test(title);
   const managerSignals = /\b(manager|management|team lead|head of)\b/.test(title);
-  if (level === "no-experience") return maxYears === 0 && !seniorSignals && !managerSignals;
-  if (level === "internship") return /intern(ship)?|trainee/i.test(title);
-  if (level === "entry") return maxYears <= 1 && !seniorSignals && !managerSignals;
-  if (level === "junior") return maxYears <= 2 && !seniorSignals && !managerSignals;
-  if (level === "associate") return maxYears <= 4 && !seniorSignals && !managerSignals;
-  if (level === "mid") return maxYears <= 7 && !seniorSignals && !managerSignals;
-  if (level === "senior") return seniorSignals || maxYears >= 7;
+  if (level === "no-experience") return requiredYears === 0 && !seniorSignals && !managerSignals;
+  if (level === "internship") return /intern(ship)?|trainee/i.test(title) && requiredYears <= 1;
+  if (level === "entry") return requiredYears <= 1 && !seniorSignals && !managerSignals;
+  if (level === "junior") return requiredYears <= 2 && !seniorSignals && !managerSignals;
+  if (level === "associate") return requiredYears <= 4 && !seniorSignals && !managerSignals;
+  if (level === "mid") return requiredYears <= 7 && !seniorSignals && !managerSignals;
+  if (level === "senior") return seniorSignals || requiredYears >= 7;
   if (level === "manager") return managerSignals;
   if (level === "executive") return /\b(director|executive|vice president|vp|chief)\b/i.test(title);
   return true;
