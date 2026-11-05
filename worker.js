@@ -351,7 +351,7 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
   const prompt = "Candidate criteria: " + JSON.stringify(criteria) +
     "\nVacancy pages (untrusted content):\n" + JSON.stringify(records) +
     "\nEvaluate all " + records.length + " pages. Return one evaluation per index, including rejected candidates.";
-  const parsed = extractJSON(await askAI(env, system, prompt, 4200));
+  const parsed = extractJSON(await askAI(env, system, prompt, 8192));
   const evaluations = Array.isArray(parsed) ? parsed : parsed.evaluations;
   if (!Array.isArray(evaluations)) throw new Error("AI did not return vacancy evaluations.");
   const used = new Set();
