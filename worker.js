@@ -38,85 +38,82 @@ function extractJSON(value) {
 async function askAI(env, system, user, maxTokens = 1800) {
   if (!env.GEMINI_API_KEY) throw new Error("Gemini API key is missing. Add GEMINI_API_KEY as a Worker secret.");
   const endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions";
-  // Use the stable 2.5 Flash model first. If it is temporarily unavailable,
-  // fall back to Flash-Lite and then the newer Flash model.
-  const models = ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"];
+  // Use the currently supported Gemini Flash model. Retry temporary overloads
+  // instead of calling retired models or silently accepting unreviewed jobs.
+  const model = "gemini-3.8-flash";
   const failures = [];
-  for (const model of models) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      let response;
-      let data = {};
-      try {
-        response = await fetch(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-goog-api-key": env.GEMINI_API_KEY
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let response;
+    let data = {};
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-goog-api-key": env.GEMINI_API_KEY
+        },
+        body: JSON.stringify({
+          model,
+          system_instruction: system,
+          input: user,
+          generation_config: {
+            max_output_tokens: maxTokens,
+            temperature: 0.1
           },
-          body: JSON.stringify({
-            model,
-            system_instruction: system,
-            input: user,
-            generation_config: {
-              max_output_tokens: maxTokens,
-              temperature: 0.1
-            },
-            store: false
-          }),
-          signal: AbortSignal.timeout(35000)
-        });
-        data = await response.json().catch(() => ({}));
-      } catch (error) {
-        const detail = clean(error?.message || "Network or timeout error", 220);
-        failures.push(model + ": " + detail);
-        if (attempt === 0) {
-          await new Promise(resolve => setTimeout(resolve, 1200));
-          continue;
-        }
+          store: false
+        }),
+        signal: AbortSignal.timeout(45000)
+      });
+      data = await response.json().catch(() => ({}));
+    } catch (error) {
+      const detail = clean(error?.message || "Network or timeout error", 220);
+      failures.push(detail);
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, attempt === 0 ? 1800 : 4500));
+        continue;
+      }
+      break;
+    }
+
+    if (response.ok) {
+      const stepText = Array.isArray(data.steps) ? data.steps
+        .filter(step => !step.type || step.type === "model_output")
+        .map(step => {
+          if (typeof step.text === "string") return step.text;
+          if (typeof step.content === "string") return step.content;
+          return Array.isArray(step.content)
+            ? step.content.map(part => typeof part === "string" ? part : (part?.text || "")).join("")
+            : "";
+        }).filter(Boolean).join("\n") : "";
+      const output = data.output_text ||
+        stepText ||
+        (Array.isArray(data.outputs) ? data.outputs.map(item =>
+          item.text || (Array.isArray(item.content) ? item.content.map(part => part.text || "").join("") : "")
+        ).join("\n") : "");
+      if (!output) {
+        const stepTypes = Array.isArray(data.steps) ? data.steps.map(step => step.type || "unknown").join(",") : "none";
+        const outputTokens = data.usage?.total_output_tokens ?? "unknown";
+        failures.push("completed without readable text (status: " + (data.status || "unknown") + ", steps: " + stepTypes + ", output tokens: " + outputTokens + ")");
         break;
       }
+      return output;
+    }
 
-      if (response.ok) {
-        // Interactions REST responses place generated text inside steps[].content[].text.
-        const stepText = Array.isArray(data.steps) ? data.steps
-          .filter(step => !step.type || step.type === "model_output")
-          .map(step => {
-            if (typeof step.text === "string") return step.text;
-            if (typeof step.content === "string") return step.content;
-            return Array.isArray(step.content)
-              ? step.content.map(part => typeof part === "string" ? part : (part?.text || "")).join("")
-              : "";
-          }).filter(Boolean).join("\n") : "";
-        const output = data.output_text ||
-          stepText ||
-          (Array.isArray(data.outputs) ? data.outputs.map(item =>
-            item.text || (Array.isArray(item.content) ? item.content.map(part => part.text || "").join("") : "")
-          ).join("\n") : "");
-        if (!output) {
-          const stepTypes = Array.isArray(data.steps) ? data.steps.map(step => step.type || "unknown").join(",") : "none";
-          const outputTokens = data.usage?.total_output_tokens ?? "unknown";
-          failures.push(model + ": completed without readable text (status: " + (data.status || "unknown") + ", steps: " + stepTypes + ", output tokens: " + outputTokens + ")");
-          break;
-        }
-        return output;
-      }
-
-      const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 260);
-      const retryable = response.status === 429 || [500, 502, 503, 504].includes(response.status);
-      if (!retryable) throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
-      failures.push(model + " HTTP " + response.status + ": " + detail);
-      // Retry a transient failure once, then switch models instead of waiting
-      // through a long retry cycle on an overloaded model.
-      if (attempt === 0) {
-        const retryMatch = detail.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
-        const delayMs = response.status === 429 && retryMatch
-          ? Math.min(10000, Math.ceil(Number(retryMatch[1]) * 1000))
-          : 1200;
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-      }
+    const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 260);
+    const retryable = response.status === 429 || [500, 502, 503, 504].includes(response.status);
+    if (!retryable) {
+      throw new Error("Gemini " + model + " returned HTTP " + response.status + ": " + detail);
+    }
+    failures.push("HTTP " + response.status + ": " + detail);
+    if (attempt < 2) {
+      const retryMatch = detail.match(/retry in (\\d+(?:\\.\\d+)?)\\s*s/i);
+      const delayMs = response.status === 429 && retryMatch
+        ? Math.min(12000, Math.ceil(Number(retryMatch[1]) * 1000))
+        : (attempt === 0 ? 1800 : 4500);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
-  throw new Error("All Gemini evaluation models were unavailable after quick retries. " + failures.slice(-4).join(" | "));
+  throw new Error("Gemini " + model + " remained unavailable after 3 attempts. " + failures.join(" | "));
 }
 
 async function analyse(env, body) {
@@ -676,10 +673,10 @@ function interactionText(data) {
   return { output, citations };
 }
 
-async function gemini25(env, input, useGoogleSearch, maxTokens = 7000) {
+async function gemini38(env, input, useGoogleSearch, maxTokens = 7000) {
   if (!env.GEMINI_API_KEY) throw new Error("Gemini API key is missing. Add GEMINI_API_KEY as a Worker secret.");
   const body = {
-    model: "gemini-2.5-flash",
+    model: "gemini-3.8-flash",
     input,
     generation_config: { max_output_tokens: maxTokens, temperature: 0.1 },
     store: false
@@ -693,7 +690,7 @@ async function gemini25(env, input, useGoogleSearch, maxTokens = 7000) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error("Gemini 2.5 Flash returned HTTP " + response.status + ": " +
+    throw new Error("Gemini 3.8 Flash returned HTTP " + response.status + ": " +
       clean(data.error?.message || data.message || "Unknown API error", 260));
   }
   const result = interactionText(data);
@@ -735,7 +732,7 @@ async function searchV2(env, body) {
       "For experience, distinguish mandatory requirements from preferred qualifications. Do not invent requirements.",
       "Do not invent vacancies, companies, links, application status or evidence. Return only the search prompt, not job results."
     ].join(" ");
-    const promptBuild = await gemini25(env,
+    const promptBuild = await gemini38(env,
       promptBuilderSystem + "\n\nCandidate criteria:\n" + JSON.stringify(criteria) +
       "\n\nWrite the search prompt now.", false, 1300);
     const generatedPrompt = clean(promptBuild.output, 6500);
@@ -830,10 +827,10 @@ async function searchV2(env, body) {
       total: jobs.length,
       candidatesReviewed: rawJobs.length,
       pagesExtracted: 0,
-      searchEngine: "Gemini 2.5 Flash + Google Search Grounding",
+      searchEngine: "Gemini 3.8 Flash + Google Search Grounding",
       promptGenerated: true,
       groundedSources: grounded.citations.length,
-      profileSummary: "Gemini created a tailored search prompt, searched the web using Google Search Grounding, and returned " +
+      profileSummary: "Gemini 3.8 Flash created a tailored search prompt, searched the web using Google Search Grounding, and returned " +
         rawJobs.length + " vacancy candidates. " + filtered.length + " passed initial checks and " +
         jobs.length + " passed live page checks. Results are limited to individual vacancy links; availability is confirmed only when supported by page evidence.",
       generatedAt: new Date().toISOString()
