@@ -106,7 +106,7 @@ async function askAI(env, system, user, maxTokens = 1800) {
     }
     failures.push("HTTP " + response.status + ": " + detail);
     if (attempt < 2) {
-      const retryMatch = detail.match(/retry in (\\d+(?:\\.\\d+)?)\\s*s/i);
+      const retryMatch = detail.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
       const delayMs = response.status === 429 && retryMatch
         ? Math.min(12000, Math.ceil(Number(retryMatch[1]) * 1000))
         : (attempt === 0 ? 1800 : 4500);
