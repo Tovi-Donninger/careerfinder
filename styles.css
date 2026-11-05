@@ -107,3 +107,18 @@
 
 .job-main .job-description{font-size:11px;line-height:1.55;color:#526359;margin:9px 0 0;max-width:760px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .job-main .match-reason{font-size:11px;line-height:1.5;color:#7b887e;margin:7px 0 0}
+
+/* ChatGPT-assisted, API-free workflow */
+.chatgpt-workflow{margin:18px 0 22px;padding:22px}
+.chatgpt-workflow[hidden]{display:none}
+.workflow-top{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin-bottom:16px}
+.workflow-top h3{font:800 18px Manrope;margin:5px 0;color:var(--ink)}
+.workflow-top p,.chatgpt-workflow .note{font-size:11px;line-height:1.55;color:var(--muted);max-width:760px}
+.chatgpt-workflow label{display:flex;flex-direction:column;gap:8px;margin:14px 0;font-size:11px;font-weight:700;color:#435348}
+.chatgpt-workflow textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:9px;background:#fbfcfa;color:var(--ink);font:11px/1.55 "DM Sans",sans-serif;resize:vertical}
+.workflow-actions{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 18px}
+.import-label{margin-top:20px!important}
+.career-ideas{margin-top:18px}
+.career-ideas:empty{display:none}
+.career-ideas>.panel{padding:22px}
+@media(max-width:600px){.chatgpt-workflow{padding:16px}.workflow-top{flex-direction:column}.workflow-actions>*{flex:1}.career-ideas>.panel{padding:16px}}
