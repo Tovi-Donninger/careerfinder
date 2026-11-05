@@ -122,7 +122,7 @@ async function tavilySearch(key, query, domains) {
     query,
     search_depth: "advanced",
     topic: "general",
-    max_results: 20,
+    max_results: 25,
     include_answer: false,
     include_raw_content: false
   };
@@ -220,7 +220,7 @@ async function planSearches(env, body, location) {
     "Work arrangement: " + (body.workMode || "any"),
     "Candidate CV: " + clean(body.cv, 1800),
     "Saved career directions: " + (Array.isArray(body.roles) ? body.roles.slice(0, 5).join("; ") : ""),
-    "For Israel roles, favour full-time vacancies where English is sufficient and Hebrew is not stated as mandatory. Include relevant synonyms such as People Operations, HR Coordinator, HR Assistant, Recruitment Coordinator, Talent Acquisition Coordinator, Office Administrator and Operations Coordinator where appropriate to the requested role. Return ONLY JSON with five distinct queries: {\"searchQueries\":[\"...\",\"...\",\"...\",\"...\",\"...\"]}"
+    "For Israel roles, favour full-time vacancies where English is sufficient and Hebrew is not stated as mandatory. Create five genuinely different queries. Cover the requested job title and its close synonyms. If saved career directions contain multiple role families, allocate queries across those saved families as well, using role-specific title synonyms; do not invent unrelated career paths. Include relevant titles such as People Operations, HR Coordinator, HR Assistant, Recruitment Coordinator, Talent Acquisition Coordinator, Office Administrator, Operations Coordinator and Logistics Coordinator only when supported by the requested role or saved career directions. Return ONLY JSON with five distinct queries: {\"searchQueries\":[\"...\",\"...\",\"...\",\"...\",\"...\"]}"
   ].join("\n");
   try {
     const data = extractJSON(await askAI(env, "You are a job-search query planner. Return valid JSON only.", prompt, 700));
@@ -292,7 +292,7 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     "Return only one-vacancy pages with one exact job title and role-specific responsibilities. Reject search pages, lists, directories, career homepages and multi-job pages.",
     "Language is a hard filter: English must be positively identified as an acceptable working language, and Hebrew or any other language must not be mandatory. An English-written advert alone is not proof. If language requirements are unclear, reject.",
     "Reject explicitly closed, expired, filled or unavailable vacancies. If status is unclear, mark Not confirmed.",
-    "Respect the candidate filters, but assess actual duties and transferable skills rather than requiring the candidate to have held the exact same job title. Relevant adjacent experience in administration, office coordination, sales, customer service, recruitment support, logistics or financial services may transfer when supported by the CV. Requested role family and location must still genuinely match. For work arrangement, if criteria says any, set workModeMatches true; otherwise require evidence. For experience, use the actual minimum required years, including written numbers such as 'three years'. Junior means no more than 2 years. If no years are stated, do not invent a requirement; describe the experience level from the advert. Do not reject solely because an advert prefers direct experience if equivalent transferable skills reasonably cover the duties; clearly explain any gap in matchReason.",
+    "Respect the candidate filters, but assess actual duties and transferable skills rather than requiring the candidate to have held the exact same job title. Relevant adjacent experience in administration, office coordination, sales, customer service, recruitment support, logistics or financial services may transfer when supported by the CV. A vacancy's role family must match either the requested job title/keywords or one of the user's explicitly saved career directions; do not reject a match merely because it belongs to a different saved direction, and do not accept unrelated roles. Location must still genuinely match. For work arrangement, if criteria says any, set workModeMatches true; otherwise require evidence. For experience, use the actual minimum required years, including written numbers such as 'three years'. Junior means no more than 2 years. If no years are stated, do not invent a requirement; describe the experience level from the advert. Do not reject solely because an advert prefers direct experience if equivalent transferable skills reasonably cover the duties; clearly explain any gap in matchReason.",
     "Return every genuine match, ranked strongest first, up to 8 of the 10 candidates. Do not stop after finding one or two. Do not lower hard filters to increase the count; reject only when evidence fails a required filter. Use exact indexes.",
     'Return ONLY JSON: {"selected":[{"index":0,"isIndividualVacancy":true,"pageType":"single_individual_vacancy","company":"...","location":"...","matchReason":"...","matchScore":85,"roleMatches":true,"locationMatches":true,"workModeMatches":true,"experienceMatches":true,"workArrangement":"Remote|Hybrid|On-site|Not stated","requiredExperienceYears":0,"languageStatus":"...","englishAccepted":true,"otherLanguageRequired":false,"otherLanguagesRequired":[],"experienceSummary":"...","availabilityStatus":"Open|Closed|Not confirmed","statusEvidence":"...","applicationEvidence":"..."}]}'
   ].join(" ");
@@ -473,7 +473,7 @@ async function search(env, body) {
   ];
   const settled = await Promise.allSettled(tasks);
   const results = settled.flatMap(item => item.status === "fulfilled" ? item.value : []);
-  const candidates = uniqueResults(results).filter(job => !isDirectoryOrSearchPage(job)).slice(0, 80);
+  const candidates = uniqueResults(results).filter(job => !isDirectoryOrSearchPage(job)).slice(0, 100);
   if (!candidates.length) {
     return json({
       jobs: [], total: 0, candidatesReviewed: 0, pagesExtracted: 0,
