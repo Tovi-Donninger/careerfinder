@@ -406,7 +406,7 @@ async function search(env, body) {
   const requestedLocation = clean(body.location, 120);
   const location = !requestedLocation || /^isreal$/i.test(requestedLocation) ? "Israel" : requestedLocation;
   const experience = clean(body.experience, 40) || "any";
-  const workMode = clean(body.workMode, 30) || "any";
+  const workMode = (clean(body.workMode, 30) || "any").toLowerCase();
   const cv = clean(body.cv, 9000);
   const roles = Array.isArray(body.roles) ? body.roles.slice(0, 5).map(x => clean(x, 100)).filter(Boolean) : [];
   if (!query && !cv && !roles.length) return json({ error: "Enter a job title, location or CV before searching." }, 400);
@@ -459,7 +459,7 @@ async function search(env, body) {
       candidatesReviewed: candidates.length,
       pagesExtracted: extracted.length,
       languageChecked: true,
-      profileSummary: "CareerFinder found " + candidates.length + " potential job links, successfully read " + extracted.length + " vacancy pages, and shortlisted " + jobs.length + " individual vacancies. Search pages and directories were not displayed. Application status is only marked as confirmed when the page provides evidence.",
+      profileSummary: "CareerFinder found " + candidates.length + " potential job links, successfully read " + extracted.length + " vacancy pages, and shortlisted " + jobs.length + " individual vacancies. Review diagnostics: " + JSON.stringify(review.reviewStats) + ". Search pages and directories were not displayed. Application status is only marked as confirmed when the page provides evidence.",
       sources: settled.map((item, i) => ({ name: "Search " + (i + 1), status: item.status === "fulfilled" ? "connected" : "unavailable" })),
       generatedAt: new Date().toISOString()
     });
