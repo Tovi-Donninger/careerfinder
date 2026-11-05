@@ -752,7 +752,7 @@ async function searchV2(env, body) {
       "Provide a direct individual vacancy URL. Prefer an application URL only if it is clearly the application page for that exact vacancy.",
       "Return ONLY valid JSON, no markdown, in this exact shape: {\"jobs\":[{\"title\":\"\",\"company\":\"\",\"location\":\"\",\"description\":\"short evidence-based summary\",\"url\":\"https://...\",\"matchReason\":\"\",\"matchScore\":0,\"experienceSummary\":\"mandatory experience evidence\",\"requiredExperienceYears\":0,\"languageStatus\":\"\",\"workArrangement\":\"On-site|Hybrid|Remote|Not stated|On-site assumed — verify with employer\",\"availabilityStatus\":\"Confirmed open|Not confirmed\",\"statusEvidence\":\"\",\"applicationEvidence\":\"\"}]}. Include no other keys."
     ].join(" ");
-    const grounded = await gemini25(env,
+    const grounded = await gemini38(env,
       groundedSystem + "\n\nSearch instruction generated from the website criteria:\n" + generatedPrompt +
       "\n\nReturn the verified vacancy candidates as JSON.", true, 8000);
     const parsed = extractJSON(grounded.output);
