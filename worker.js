@@ -37,35 +37,47 @@ function extractJSON(value) {
 
 async function askAI(env, system, user, maxTokens = 1800) {
   if (!env.GEMINI_API_KEY) throw new Error("Gemini API key is missing. Add GEMINI_API_KEY as a Worker secret.");
-  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": env.GEMINI_API_KEY
-    },
-    body: JSON.stringify({
-      model: "gemini-3.8-flash",
-      system_instruction: system,
-      input: user,
-      generation_config: {
-        max_output_tokens: maxTokens,
-        temperature: 0.1
+  const endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions";
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": env.GEMINI_API_KEY
       },
-      store: false
-    }),
-    signal: AbortSignal.timeout(45000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 240);
-    throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
+      body: JSON.stringify({
+        model: "gemini-3.5-flash-lite",
+        system_instruction: system,
+        input: user,
+        generation_config: {
+          max_output_tokens: maxTokens,
+          temperature: 0.1
+        },
+        store: false
+      }),
+      signal: AbortSignal.timeout(45000)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) {
+      const output = data.output_text ||
+        (Array.isArray(data.outputs) ? data.outputs.map(item =>
+          item.text || (Array.isArray(item.content) ? item.content.map(part => part.text || "").join("") : "")
+        ).join("\n") : "");
+      if (!output) throw new Error("Gemini returned an empty response" + (data.status ? " (status: " + data.status + ")" : "") + ".");
+      return output;
+    }
+    const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 300);
+    const retryable = response.status === 429 || [500, 502, 503, 504].includes(response.status);
+    if (!retryable || attempt === 3) {
+      throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
+    }
+    const retryMatch = detail.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
+    const delayMs = response.status === 429 && retryMatch
+      ? Math.min(60000, Math.ceil(Number(retryMatch[1]) * 1000) + 1000)
+      : Math.min(30000, 4000 * Math.pow(2, attempt));
+    await new Promise(resolve => setTimeout(resolve, delayMs));
   }
-  const output = data.output_text ||
-    (Array.isArray(data.outputs) ? data.outputs.map(item =>
-      item.text || (Array.isArray(item.content) ? item.content.map(part => part.text || "").join("") : "")
-    ).join("\n") : "");
-  if (!output) throw new Error("Gemini returned an empty response" + (data.status ? " (status: " + data.status + ")" : "") + ".");
-  return output;
+  throw new Error("Gemini request failed after retries.");
 }
 
 async function analyse(env, body) {
@@ -353,21 +365,21 @@ async function verifyLiveVacancy(job) {
 
 async function reviewVacancies(env, candidates, criteria) {
   const batches = [];
-  for (let i = 0; i < candidates.length; i += 6) batches.push({ jobs: candidates.slice(i, i + 6), offset: i });
+  for (let i = 0; i < candidates.length; i += 10) batches.push({ jobs: candidates.slice(i, i + 10), offset: i });
   const selected = [];
   const batchStats = [];
   let batchFailures = 0;
-  for (let i = 0; i < batches.length; i += 3) {
-    const wave = batches.slice(i, i + 3);
-    const results = await Promise.allSettled(wave.map(batch => reviewVacancyBatch(env, batch.jobs, criteria, batch.offset)));
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        selected.push(...result.value.jobs);
-        batchStats.push(result.value.stats);
-      } else {
-        batchFailures++;
-        batchStats.push({ error: clean(result.reason?.message || "AI review failed", 160) });
-      }
+  for (let i = 0; i < batches.length; i++) {
+    // Gemini's free tier is rate-limited. Process batches serially rather than
+    // firing several simultaneous requests and exhausting the per-minute quota.
+    if (i > 0) await new Promise(resolve => setTimeout(resolve, 13000));
+    try {
+      const result = await reviewVacancyBatch(env, batches[i].jobs, criteria, batches[i].offset);
+      selected.push(...result.jobs);
+      batchStats.push(result.stats);
+    } catch (error) {
+      batchFailures++;
+      batchStats.push({ error: clean(error?.message || "AI review failed", 300) });
     }
   }
   const ranked = selected.sort((a, b) => b.matchScore - a.matchScore);
