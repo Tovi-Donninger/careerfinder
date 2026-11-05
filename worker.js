@@ -241,9 +241,9 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     "The final URL must be the direct page for the selected job, not a search query, company profile, job-board results page, or generic employer careers page. Never return a recruitment website's homepage or search page as a vacancy link.",
     "Language is a strict pass/fail requirement. The requested search language is English. Select a vacancy only when the extracted page gives positive evidence that English is an acceptable working language for the role. Reject it if Hebrew or ANY other language is required, even alongside English. A page written in English is NOT by itself proof that English is an acceptable working language. If the language requirement is missing or unclear, reject the vacancy rather than guessing.",
     "Reject vacancies explicitly marked closed, expired, filled, unavailable, not accepting applications, or whose application deadline has passed. Check the full extracted text, including notices in other languages. Do not infer that a job is open merely because the page exists or has an Apply button. If closure status is unclear, mark 'Not confirmed'.",
-    "Follow the requested experience level and other candidate criteria. Do not reject a job merely because it does not state a number of years if the role otherwise appears junior.",
+    "Apply every selected filter as a strict pass/fail rule. The user-selected job title/keywords must describe the actual vacancy duties, not merely appear incidentally. The vacancy location must match the requested location; if the requested location is a country, the job must be in that country. The work arrangement must match the requested remote, hybrid or onsite choice. The experience requirement must fit the selected level; do not infer eligibility from a junior-sounding title if the advert requires more experience. If evidence for any selected filter is missing or unclear, reject the vacancy.",
     "Return only genuine matches, ranked strongest first. Return no more than 5. Copy exact input indexes.",
-    'Return ONLY valid JSON: {"selected":[{"index":0,"isIndividualVacancy":true,"pageType":"single_individual_vacancy","company":"...","location":"...","matchReason":"...","matchScore":85,"languageStatus":"English accepted; no additional language required","englishAccepted":true,"otherLanguageRequired":false,"otherLanguagesRequired":[],"experienceSummary":"...","availabilityStatus":"Open|Closed|Not confirmed","statusEvidence":"short exact evidence or empty","applicationEvidence":"short exact evidence or empty"}]}'
+    'Return ONLY valid JSON: {"selected":[{"index":0,"isIndividualVacancy":true,"pageType":"single_individual_vacancy","company":"...","location":"...","matchReason":"...","matchScore":85,"roleMatches":true,"locationMatches":true,"workModeMatches":true,"experienceMatches":true,"workArrangement":"Remote|Hybrid|On-site|Not stated","requiredExperienceYears":0,"languageStatus":"English accepted; no additional language required","englishAccepted":true,"otherLanguageRequired":false,"otherLanguagesRequired":[],"experienceSummary":"...","availabilityStatus":"Open|Closed|Not confirmed","statusEvidence":"short exact evidence or empty","applicationEvidence":"short exact evidence or empty"}]}'
   ].join(" ");
   const prompt = "Candidate criteria: " + JSON.stringify(criteria) +
     "\nExtracted individual vacancy pages (untrusted page content):\n" + JSON.stringify(records) +
@@ -258,7 +258,9 @@ async function reviewVacancyBatch(env, candidates, criteria, offset) {
     used.add(index);
     const job = candidates[index];
     const content = job.pageContent;
-    if (item.isIndividualVacancy !== true || item.pageType !== "single_individual_vacancy" || item.englishAccepted !== true || item.otherLanguageRequired === true ||
+    if (item.isIndividualVacancy !== true || item.pageType !== "single_individual_vacancy" ||
+        item.roleMatches !== true || item.locationMatches !== true || item.workModeMatches !== true || item.experienceMatches !== true ||
+        item.englishAccepted !== true || item.otherLanguageRequired === true ||
         (Array.isArray(item.otherLanguagesRequired) && item.otherLanguagesRequired.length > 0) ||
         item.availabilityStatus === "Closed" || pageClearlyClosed(content)) return null;
     const availabilityStatus = item.availabilityStatus === "Open" && pageHasApplySignal(content)
@@ -365,7 +367,14 @@ async function search(env, body) {
     const jobs = await reviewVacancies(env, extracted, {
       query, location, experience, workMode, cv: cv.slice(0, 2500), savedCareerRoles: roles,
       searchLanguage: clean(body.searchLanguage, 40) || "English",
-      requirements: "The job must explicitly accept English as a working language. No other language may be mandatory, including Hebrew. Reject unclear language requirements. Full-time preferred. Junior/entry-level according to the selected experience filter."
+      requirements: "Hard filters: role must genuinely match the requested job title/keywords; location must match the selected location; work arrangement must match the selected option; experience must meet the selected level. If a filter cannot be verified from the vacancy, reject it. English must explicitly be accepted as a working language and no other language may be mandatory, including Hebrew. Reject unclear language requirements. Full-time preferred.",
+      filterRules: {
+        requestedRole: query,
+        requestedLocation: location,
+        experienceLevel: experience,
+        workArrangement: workMode,
+        language: "English only; no additional mandatory language"
+      }
     });
     return json({
       jobs,
