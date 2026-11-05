@@ -36,13 +36,36 @@ function extractJSON(value) {
 }
 
 async function askAI(env, system, user, maxTokens = 1800) {
-  if (!env.AI) throw new Error("Cloudflare Workers AI is not connected.");
-  const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct-fp8", {
-    messages: [{ role: "system", content: system }, { role: "user", content: user }],
-    max_tokens: maxTokens,
-    temperature: 0.1
+  if (!env.GEMINI_API_KEY) throw new Error("Gemini API key is missing. Add GEMINI_API_KEY as a Worker secret.");
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": env.GEMINI_API_KEY
+    },
+    body: JSON.stringify({
+      model: "gemini-3.8-flash",
+      system_instruction: system,
+      input: user,
+      generation_config: {
+        max_output_tokens: maxTokens,
+        temperature: 0.1
+      },
+      store: false
+    }),
+    signal: AbortSignal.timeout(45000)
   });
-  return result.response || result.result?.response || "";
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 240);
+    throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
+  }
+  const output = data.output_text ||
+    (Array.isArray(data.outputs) ? data.outputs.map(item =>
+      item.text || (Array.isArray(item.content) ? item.content.map(part => part.text || "").join("") : "")
+    ).join("\n") : "");
+  if (!output) throw new Error("Gemini returned an empty response" + (data.status ? " (status: " + data.status + ")" : "") + ".");
+  return output;
 }
 
 async function analyse(env, body) {
