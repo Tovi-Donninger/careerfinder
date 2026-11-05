@@ -435,6 +435,30 @@ async function verifyLiveVacancy(job) {
   }
 }
 
+async function reviewBatchWithRecovery(env, jobs, criteria, offset, depth = 0) {
+  try {
+    const result = await reviewVacancyBatch(env, jobs, criteria, offset);
+    return { jobs: result.jobs, stats: [result.stats] };
+  } catch (error) {
+    const message = clean(error?.message || "AI review failed", 300);
+    // Large JSON responses can be truncated. Only in that case, retry the
+    // failed batch as smaller pieces; successful normal batches stay fast.
+    const canSplit = /incomplete JSON|did not return vacancy evaluations|did not return JSON/i.test(message)
+      && jobs.length > 5 && depth < 2;
+    if (!canSplit) return { jobs: [], stats: [{ error: message }] };
+    const midpoint = Math.ceil(jobs.length / 2);
+    const left = jobs.slice(0, midpoint);
+    const right = jobs.slice(midpoint);
+    const first = await reviewBatchWithRecovery(env, left, criteria, offset, depth + 1);
+    await new Promise(resolve => setTimeout(resolve, 12000));
+    const second = await reviewBatchWithRecovery(env, right, criteria, offset + midpoint, depth + 1);
+    return {
+      jobs: [...first.jobs, ...second.jobs],
+      stats: [...first.stats, ...second.stats].map(item => ({ ...item, recoveredFromIncompleteResponse: true }))
+    };
+  }
+}
+
 async function reviewVacancies(env, candidates, criteria) {
   const batches = [];
   for (let i = 0; i < candidates.length; i += 20) batches.push({ jobs: candidates.slice(i, i + 20), offset: i });
@@ -445,14 +469,10 @@ async function reviewVacancies(env, candidates, criteria) {
     // Gemini's free tier is rate-limited. Process batches serially rather than
     // firing several simultaneous requests and exhausting the per-minute quota.
     if (i > 0) await new Promise(resolve => setTimeout(resolve, 12000));
-    try {
-      const result = await reviewVacancyBatch(env, batches[i].jobs, criteria, batches[i].offset);
-      selected.push(...result.jobs);
-      batchStats.push(result.stats);
-    } catch (error) {
-      batchFailures++;
-      batchStats.push({ error: clean(error?.message || "AI review failed", 300) });
-    }
+    const result = await reviewBatchWithRecovery(env, batches[i].jobs, criteria, batches[i].offset);
+    selected.push(...result.jobs);
+    batchStats.push(...result.stats);
+    batchFailures += result.stats.filter(item => item.error).length;
   }
   const ranked = selected.sort((a, b) => b.matchScore - a.matchScore);
   const liveChecks = [];
