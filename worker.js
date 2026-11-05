@@ -38,32 +38,46 @@ function extractJSON(value) {
 async function askAI(env, system, user, maxTokens = 1800) {
   if (!env.GEMINI_API_KEY) throw new Error("Gemini API key is missing. Add GEMINI_API_KEY as a Worker secret.");
   const endpoint = "https://generativelanguage.googleapis.com/v1beta/interactions";
-  const models = ["gemini-3.5-flash-lite", "gemini-3.8-flash"];
-  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
-    const model = models[modelIndex];
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": env.GEMINI_API_KEY
-        },
-        body: JSON.stringify({
-          model,
-          system_instruction: system,
-          input: user,
-          generation_config: {
-            max_output_tokens: maxTokens,
-            temperature: 0.1
+  // Use the stable 2.5 Flash model first. If it is temporarily unavailable,
+  // fall back to Flash-Lite and then the newer Flash model.
+  const models = ["gemini-2.5-flash", "gemini-3.5-flash-lite", "gemini-3.8-flash"];
+  const failures = [];
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let response;
+      let data = {};
+      try {
+        response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": env.GEMINI_API_KEY
           },
-          store: false
-        }),
-        signal: AbortSignal.timeout(45000)
-      });
-      const data = await response.json().catch(() => ({}));
+          body: JSON.stringify({
+            model,
+            system_instruction: system,
+            input: user,
+            generation_config: {
+              max_output_tokens: maxTokens,
+              temperature: 0.1
+            },
+            store: false
+          }),
+          signal: AbortSignal.timeout(35000)
+        });
+        data = await response.json().catch(() => ({}));
+      } catch (error) {
+        const detail = clean(error?.message || "Network or timeout error", 220);
+        failures.push(model + ": " + detail);
+        if (attempt === 0) {
+          await new Promise(resolve => setTimeout(resolve, 1200));
+          continue;
+        }
+        break;
+      }
+
       if (response.ok) {
-        // Interactions REST responses place generated text inside
-        // steps[].content[].text (not output_text / outputs).
+        // Interactions REST responses place generated text inside steps[].content[].text.
         const stepText = Array.isArray(data.steps) ? data.steps
           .filter(step => !step.type || step.type === "model_output")
           .map(step => {
@@ -81,30 +95,28 @@ async function askAI(env, system, user, maxTokens = 1800) {
         if (!output) {
           const stepTypes = Array.isArray(data.steps) ? data.steps.map(step => step.type || "unknown").join(",") : "none";
           const outputTokens = data.usage?.total_output_tokens ?? "unknown";
-          throw new Error("Gemini completed but returned no readable text (status: " + (data.status || "unknown") + ", steps: " + stepTypes + ", output tokens: " + outputTokens + ").");
+          failures.push(model + ": completed without readable text (status: " + (data.status || "unknown") + ", steps: " + stepTypes + ", output tokens: " + outputTokens + ")");
+          break;
         }
         return output;
       }
-      const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 300);
+
+      const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 260);
       const retryable = response.status === 429 || [500, 502, 503, 504].includes(response.status);
-      if (!retryable) {
-        throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
+      if (!retryable) throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
+      failures.push(model + " HTTP " + response.status + ": " + detail);
+      // Retry a transient failure once, then switch models instead of waiting
+      // through a long retry cycle on an overloaded model.
+      if (attempt === 0) {
+        const retryMatch = detail.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
+        const delayMs = response.status === 429 && retryMatch
+          ? Math.min(10000, Math.ceil(Number(retryMatch[1]) * 1000))
+          : 1200;
+        await new Promise(resolve => setTimeout(resolve, delayMs));
       }
-      // If Flash-Lite is overloaded, switch models promptly instead of
-      // spending the full retry window on an unavailable endpoint.
-      if (response.status === 503 && modelIndex === 0 && attempt >= 1) break;
-      if (attempt === 3) {
-        if (modelIndex < models.length - 1 && [500, 502, 503, 504].includes(response.status)) break;
-        throw new Error("Gemini API returned HTTP " + response.status + ": " + detail);
-      }
-      const retryMatch = detail.match(/retry in (\d+(?:\.\d+)?)\s*s/i);
-      const delayMs = response.status === 429 && retryMatch
-        ? Math.min(60000, Math.ceil(Number(retryMatch[1]) * 1000) + 1000)
-        : Math.min(16000, 3000 * Math.pow(2, attempt));
-      await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
-  throw new Error("Gemini models failed after retries.");
+  throw new Error("All Gemini evaluation models were unavailable after quick retries. " + failures.slice(-4).join(" | "));
 }
 
 async function analyse(env, body) {
