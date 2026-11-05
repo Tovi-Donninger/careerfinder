@@ -686,13 +686,12 @@ function buildCareerFinderCriteria(body) {
     workMode: (clean(body.workMode, 30) || "any").toLowerCase(),
     language: clean(body.searchLanguage, 40) || "English",
     savedCareerRoles: roles,
-    candidateBackground: clean(body.cv, 1800)
   };
 }
 
 async function searchV2(env, body) {
   const criteria = buildCareerFinderCriteria(body);
-  if (!criteria.query && !criteria.candidateBackground) {
+  if (!criteria.query) {
     return json({ error: "Enter a job title, location or CV before searching." }, 400);
   }
 
