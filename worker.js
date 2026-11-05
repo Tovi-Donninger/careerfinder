@@ -59,11 +59,27 @@ async function askAI(env, system, user, maxTokens = 1800) {
     });
     const data = await response.json().catch(() => ({}));
     if (response.ok) {
+      // Interactions REST responses place generated text inside
+      // steps[].content[].text (not output_text / outputs).
+      const stepText = Array.isArray(data.steps) ? data.steps
+        .filter(step => !step.type || step.type === "model_output")
+        .map(step => {
+          if (typeof step.text === "string") return step.text;
+          if (typeof step.content === "string") return step.content;
+          return Array.isArray(step.content)
+            ? step.content.map(part => typeof part === "string" ? part : (part?.text || "")).join("")
+            : "";
+        }).filter(Boolean).join("\n") : "";
       const output = data.output_text ||
+        stepText ||
         (Array.isArray(data.outputs) ? data.outputs.map(item =>
           item.text || (Array.isArray(item.content) ? item.content.map(part => part.text || "").join("") : "")
         ).join("\n") : "");
-      if (!output) throw new Error("Gemini returned an empty response" + (data.status ? " (status: " + data.status + ")" : "") + ".");
+      if (!output) {
+        const stepTypes = Array.isArray(data.steps) ? data.steps.map(step => step.type || "unknown").join(",") : "none";
+        const outputTokens = data.usage?.total_output_tokens ?? "unknown";
+        throw new Error("Gemini completed but returned no readable text (status: " + (data.status || "unknown") + ", steps: " + stepTypes + ", output tokens: " + outputTokens + ").");
+      }
       return output;
     }
     const detail = clean(data.error?.message || data.message || "Unknown Gemini API error", 300);
