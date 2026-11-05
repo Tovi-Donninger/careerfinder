@@ -135,7 +135,7 @@ function normaliseUrl(value) {
 }
 
 function pageClearlyClosed(content) {
-  return /no longer accepting applications|not accepting applications|applications are closed|application period has ended|this (?:job|position|vacancy) (?:is )?closed|position has been filled|job has been filled|vacancy has been filled|no longer available|job posting has expired|this job is expired|applications for this role have closed|this opportunity is no longer available|the job is no longer available|recruitment process has ended|position is no longer open|vacancy is closed/i.test(content);
+  return /no longer accepting applications|not accepting applications|applications are closed|application period has ended|this (?:job|position|vacancy) (?:is )?closed|position has been filled|job has been filled|vacancy has been filled|no longer available|job posting has expired|this job is expired|applications for this role have closed|this opportunity is no longer available|the job is no longer available|recruitment process has ended|position is no longer open|vacancy is closed|posting is no longer active|this role has been filled|applications are no longer being accepted|job has been removed/i.test(content);
 }
 
 function pageHasApplySignal(content) {
@@ -303,7 +303,7 @@ async function verifyLiveVacancy(job) {
     try { originalHost = new URL(job.url).hostname.replace(/^www\./, "").toLowerCase(); } catch { return null; }
     if (finalHost !== originalHost && /google\.|bing\.|indeed\.|linkedin\./i.test(finalHost)) return null;
     const html = await response.text();
-    const liveText = clean(html, 30000);
+    const liveText = clean(html, 100000);
     if (pageClearlyClosed(liveText) || !pageHasApplySignal(liveText)) return null;
     return { ...job, url: finalUrl, availabilityStatus: "Live vacancy page checked · application option present" };
   } catch {
