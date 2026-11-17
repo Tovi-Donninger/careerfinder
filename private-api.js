@@ -73,6 +73,29 @@ export async function personalApi(request, env, url, searchHandler) {
     await env.DB.prepare("INSERT INTO personal_profile(id,profile_json,updated_at) VALUES(1,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET profile_json=excluded.profile_json,updated_at=CURRENT_TIMESTAMP").bind(JSON.stringify(body.profile)).run();
     return response({ok:true});
   }
+  if (path === "/api/private/recruitment/jobs" && method === "GET") {
+    const rows=await env.DB.prepare("SELECT * FROM recruitment_jobs ORDER BY discovered_at DESC LIMIT 500").all();
+    return response({jobs:rows.results||[]});
+  }
+  if (path === "/api/private/recruitment/jobs" && method === "POST") {
+    const raw=await request.text();
+    if(raw.length>120000)return response({error:"Payload too large"},413);
+    let body;try{body=JSON.parse(raw)}catch{return response({error:"Invalid JSON"},400)}
+    const jobs=Array.isArray(body.jobs)?body.jobs:[body.job];
+    if(!jobs.length||jobs.length>50)return response({error:"Provide 1–50 jobs"},400);
+    const clean=(v,n)=>typeof v==="string"?v.trim().slice(0,n):"";
+    const records=[];
+    for(const job of jobs){
+      if(!job||typeof job!=="object")return response({error:"Invalid job"},400);
+      let url;try{url=new URL(job.url);if(url.protocol!=="https:")throw Error("https required");url.hash="";for(const key of [...url.searchParams.keys()])if(/^(utm_|fbclid$|gclid$)/i.test(key))url.searchParams.delete(key)}catch{return response({error:"Each job needs a valid HTTPS vacancy URL"},400)}
+      const title=clean(job.title,250),company=clean(job.company,250);
+      if(!title||!company)return response({error:"Each job needs a title and company"},400);
+      records.push({id:crypto.randomUUID(),url:url.toString(),title,company,location:clean(job.location,250),work:clean(job.workArrangement,80),type:clean(job.employmentType,80),salary:clean(job.salary,120),score:Number.isInteger(job.matchScore)&&job.matchScore>=0&&job.matchScore<=100?job.matchScore:null,reason:clean(job.matchReason,2500),language:clean(job.languageEvidence,1500),eligibility:clean(job.eligibilityEvidence,1500),verification:clean(job.verificationStatus,80)||"Unverified",source:clean(job.source,150)});
+    }
+    const statements=records.map(j=>env.DB.prepare(`INSERT INTO recruitment_jobs(id,url,title,company,location,work_arrangement,employment_type,salary,match_score,match_reason,language_evidence,eligibility_evidence,verification_status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET title=excluded.title,company=excluded.company,location=excluded.location,work_arrangement=excluded.work_arrangement,employment_type=excluded.employment_type,salary=excluded.salary,match_score=excluded.match_score,match_reason=excluded.match_reason,language_evidence=excluded.language_evidence,eligibility_evidence=excluded.eligibility_evidence,verification_status=excluded.verification_status,source=excluded.source,last_seen_at=CURRENT_TIMESTAMP`).bind(j.id,j.url,j.title,j.company,j.location,j.work,j.type,j.salary,j.score,j.reason,j.language,j.eligibility,j.verification,j.source));
+    await env.DB.batch(statements);
+    return response({ok:true,received:records.length});
+  }
   if (path === "/api/private/applications" && method === "GET") {
     const rows = await env.DB.prepare("SELECT * FROM applications ORDER BY updated_at DESC LIMIT 1000").all();
     return response({applications:rows.results || []});
