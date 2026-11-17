@@ -100,6 +100,23 @@ export async function personalApi(request, env, url, searchHandler) {
     await env.DB.batch([...statements,...records.map(j=>env.DB.prepare("INSERT INTO recruitment_zero_experience_evidence(job_url,evidence,source_url) VALUES(?,?,?) ON CONFLICT(job_url) DO UPDATE SET evidence=excluded.evidence,source_url=excluded.source_url,verified_at=CURRENT_TIMESTAMP").bind(j.url,j.zeroEvidence,j.zeroSource))]);
     return response({ok:true,received:records.length});
   }
+  if (path === "/api/private/recruitment/application-executor/handoff" && method === "POST") {
+    let body;try{body=await request.json()}catch{return response({error:"Invalid JSON"},400)}
+    if(typeof body?.jobId!=="string"||body.jobId.length>100)return response({error:"jobId required"},400);
+    const job=await env.DB.prepare("SELECT * FROM recruitment_jobs WHERE id=?").bind(body.jobId).first();
+    if(!job)return response({error:"Job not found"},404);
+    const evidence=await env.DB.prepare("SELECT * FROM recruitment_zero_experience_evidence WHERE job_url=?").bind(job.url).first();
+    const policy=await env.DB.prepare("SELECT * FROM recruitment_application_policy WHERE id=1").first();
+    const row=await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
+    let profile=null;try{profile=row?JSON.parse(row.profile_json):null}catch{}
+    const reasons=(await assessApplication(job,evidence,profile,{...policy,enabled:1})).reasons;
+    if(reasons.length)return response({error:"Application handoff blocked",reasons},409);
+    const channel=routeApplication(job.url);
+    if(channel.channel==="linkedin"||channel.channel==="indeed")return response({error:"Exact employer application URL must be verified first",channel},409);
+    const existing=await env.DB.prepare("SELECT status FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
+    if(existing?.status==="Submitted")return response({error:"Already submitted; duplicate blocked"},409);
+    return response({jobId:job.id,job:{url:job.url,title:job.title,company:job.company},profile,verifiedZeroExperience:true,verifiedEnglish:true,verifiedIsraelEligibility:true,confirmedOpen:true,sourceEvidence:{zeroExperience:evidence.evidence,sourceUrl:evidence.source_url,language:job.language_evidence,eligibility:job.eligibility_evidence,open:job.verification_status},note:"Private, authenticated handoff. Browser executor must independently check the employer page. No submission occurred."});
+  }
   // Application automation is deliberately disabled until an authorized submission
   // adapter is installed. A queued item must never be represented as submitted.
   if (path === "/api/private/recruitment/application-executor/run" && method === "POST") {
