@@ -7,3 +7,5 @@ test("rejects closed vacancy",()=>assert.ok(inspectVacancy({...base,pageText:bas
 test("rejects unverified eligibility",()=>assert.equal(inspectVacancy({...base,sourceEvidence:{language:"English requirement not confirmed",eligibility:"Israel eligible"}}).verified,false));
 test("rejects experience requirement without explicit zero-experience evidence",()=>assert.equal(inspectVacancy({...base,pageText:"Example Company hiring a Junior HR Assistant. Must have three years professional experience. Full-time in Tel Aviv, Israel."}).verified,false));
 test("rejects additional mandatory language",()=>assert.equal(inspectVacancy({...base,pageText:base.pageText+" Fluent Hebrew required."}).verified,false));
+test("rejects arbitrary language evidence",()=>assert.equal(inspectVacancy({...base,sourceEvidence:{language:"French required",eligibility:"Israel eligible"}}).verified,false));
+test("rejects arbitrary country evidence",()=>assert.equal(inspectVacancy({...base,sourceEvidence:{language:"English required",eligibility:"United States eligible"}}).verified,false));
