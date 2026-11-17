@@ -60,3 +60,16 @@ The handoff requires the job to exist in the private D1 recruitment database and
 This integration is a **manual authenticated handoff**, not a hosted scheduled executor. The prototype does not upload receipts to D1 or mark jobs submitted in the dashboard. Submission remains a separately authorized command, and no production browser runner is deployed.
 
 **Security note:** The handoff includes private profile data and must be kept on a trusted device; delete the local JSON and screenshots when no longer needed. The current eligibility evidence is recorded screening data, not an independent live check of the employer posting.
+
+
+## Upload browser receipts to private CareerFinder (new)
+
+After a local browser run, use the same private 12-hour session token to upload the JSON receipt. The original handoff's `jobId` is required:
+
+```bash
+node scripts/upload-application-receipt.mjs application-receipts/RECEIPT_ID.json JOB_ID
+```
+
+This calls the authenticated `/api/private/recruitment/application-executor/receipt` endpoint. Receipts are stored in `recruitment_application_receipts` as **Pending review** and may be viewed via `GET /api/private/recruitment/application-executor/receipts`. Uploading a receipt **does not mark the job Submitted** and does not increase the confirmed-submissions count.
+
+The Cloudflare deployment workflow now applies `migrations/0005_application_receipts.sql`. Deployment and end-to-end testing remain unverified. The browser executor is still local; there is no deployed browser worker, automated employer form submission service, or independently verified receipt ingestion. Do not use this to claim automatic submissions are live.
