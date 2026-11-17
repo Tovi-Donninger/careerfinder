@@ -23,18 +23,18 @@ jobs:
       - name: Check private credentials
         env:
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
-          CAREERFINDER_SESSION_TOKEN: ${{ secrets.CAREERFINDER_SESSION_TOKEN }}
+          CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
           CAREERFINDER_CV_BASE64: ${{ secrets.CAREERFINDER_CV_BASE64 }}
         run: |
           test -n "$BROWSERLESS_TOKEN" || { echo "::error::Missing BROWSERLESS_TOKEN"; exit 1; }
-          test -n "$CAREERFINDER_SESSION_TOKEN" || { echo "::error::Missing CAREERFINDER_SESSION_TOKEN"; exit 1; }
+          test -n "$CAREERFINDER_AUTOMATION_KEY" || { echo "::error::Missing CAREERFINDER_AUTOMATION_KEY"; exit 1; }
           test -n "$CAREERFINDER_CV_BASE64" || { echo "::error::Missing CAREERFINDER_CV_BASE64"; exit 1; }
       - name: Install browser client
         run: npm install --no-save --no-package-lock playwright-core@1.56.1
       - name: Prepare one screened job (NEVER SUBMIT)
         env:
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
-          CAREERFINDER_SESSION_TOKEN: ${{ secrets.CAREERFINDER_SESSION_TOKEN }}
+          CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
           CAREERFINDER_CV_BASE64: ${{ secrets.CAREERFINDER_CV_BASE64 }}
           JOB_ID: ${{ inputs.job_id }}
           CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP: '900'
