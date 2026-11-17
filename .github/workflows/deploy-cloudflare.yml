@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - 'worker.js'
+      - 'free-search.js'
       - 'private-api.js'
       - 'wrangler.jsonc'
       - 'migrations/**'
