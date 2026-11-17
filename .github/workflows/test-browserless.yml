@@ -1,0 +1,29 @@
+name: Test Browserless connection (no applications)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify token configured
+        env:
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+        run: |
+          if [ -z "$BROWSERLESS_TOKEN" ]; then
+            echo "::error::BROWSERLESS_TOKEN is not configured"
+            exit 1
+          fi
+      - name: Install browser client
+        run: npm install --no-save --no-package-lock playwright-core@1.56.1
+      - name: Connect and open harmless test page
+        env:
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          BROWSERLESS_WS_ENDPOINT: wss://production-ams.browserless.io
+        run: node scripts/test-browserless-connection.mjs
