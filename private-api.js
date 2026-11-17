@@ -54,7 +54,7 @@ export async function personalApi(request, env, url, searchHandler) {
   }
   // Dedicated machine credential: read-only access to screened job handoffs.
   // Never authorize profile edits, queue mutations, or application submission with this key.
-  const machinePaths=new Set(["/api/private/recruitment/application-executor/handoff","/api/private/recruitment/application-executor/receipt"]);
+  const machinePaths=new Set(["/api/private/recruitment/application-executor/handoff","/api/private/recruitment/application-executor/receipt","/api/private/recruitment/application-executor/next"]);
   let machineAuthorized=false;
   if(machinePaths.has(path)&&method==="POST"&&env.CAREERFINDER_AUTOMATION_KEY){
     const supplied=request.headers.get("X-CareerFinder-Automation-Key")||"";
@@ -111,6 +111,13 @@ export async function personalApi(request, env, url, searchHandler) {
     const statements=records.map(j=>env.DB.prepare(`INSERT INTO recruitment_jobs(id,url,title,company,location,work_arrangement,employment_type,salary,match_score,match_reason,language_evidence,eligibility_evidence,verification_status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET title=excluded.title,company=excluded.company,location=excluded.location,work_arrangement=excluded.work_arrangement,employment_type=excluded.employment_type,salary=excluded.salary,match_score=excluded.match_score,match_reason=excluded.match_reason,language_evidence=excluded.language_evidence,eligibility_evidence=excluded.eligibility_evidence,verification_status=excluded.verification_status,source=excluded.source,last_seen_at=CURRENT_TIMESTAMP`).bind(j.id,j.url,j.title,j.company,j.location,j.work,j.type,j.salary,j.score,j.reason,j.language,j.eligibility,j.verification,j.source));
     await env.DB.batch([...statements,...records.map(j=>env.DB.prepare("INSERT INTO recruitment_zero_experience_evidence(job_url,evidence,source_url) VALUES(?,?,?) ON CONFLICT(job_url) DO UPDATE SET evidence=excluded.evidence,source_url=excluded.source_url,verified_at=CURRENT_TIMESTAMP").bind(j.url,j.zeroEvidence,j.zeroSource))]);
     return response({ok:true,received:records.length});
+  }
+  if (path === "/api/private/recruitment/application-executor/next" && method === "POST") {
+    // Machine-readable candidate discovery only; no applications are submitted here.
+    // The browser runner independently checks the vacancy and pauses on unknown fields.
+    const rows=await env.DB.prepare("SELECT j.id,j.url,j.title,j.company FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url LEFT JOIN recruitment_application_queue q ON q.job_id=j.id WHERE q.id IS NULL AND j.match_score>=85 AND (j.verification_status LIKE '%Confirmed open%' OR j.verification_status LIKE '%accepting applications%') AND j.language_evidence LIKE '%English%' AND j.language_evidence NOT LIKE '%not confirmed%' AND j.eligibility_evidence IS NOT NULL AND j.eligibility_evidence NOT LIKE '%not confirmed%' ORDER BY j.match_score DESC,j.discovered_at DESC LIMIT 40").all();
+    const jobs=(rows.results||[]).filter(j=>!["linkedin","indeed"].includes(routeApplication(j.url).channel));
+    return response({jobs,automaticSubmissionAvailable:false,note:"Candidates require independent handoff eligibility and browser checks before submission."});
   }
   if (path === "/api/private/recruitment/application-executor/handoff" && method === "POST") {
     let body;try{body=await request.json()}catch{return response({error:"Invalid JSON"},400)}
