@@ -1,7 +1,7 @@
 // Local Playwright employer-form executor. Never run on LinkedIn or Indeed.
 // Requires explicit --submit approval; does not bypass access controls or CAPTCHA.
 // npm install --no-save playwright && npx playwright install chromium
-import { chromium } from "playwright";
+import { chromium } from "playwright-core";
 import { readFile, writeFile, mkdir, open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -38,7 +38,12 @@ try{
 }finally{await lock.close();await (await import("node:fs/promises")).unlink(lockPath).catch(()=>{})}
 }
 const browser=token
- ? await chromium.connectOverCDP((process.env.BROWSERLESS_WS_ENDPOINT||"wss://production-ams.browserless.io").replace(/\\/$/,"")+"?token="+encodeURIComponent(token))
+ ? await chromium.connectOverCDP((() => {
+    const endpoint=new URL(process.env.BROWSERLESS_WS_ENDPOINT||"wss://production-ams.browserless.io");
+    if(endpoint.protocol!=="wss:"||endpoint.username||endpoint.password||endpoint.search||endpoint.hash)throw Error("Invalid Browserless endpoint");
+    endpoint.searchParams.set("token",token);
+    return endpoint.toString();
+   })())
  : await chromium.launch({headless:!args.includes("--visible")});
 
 const page=await browser.newPage({acceptDownloads:false});
