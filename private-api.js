@@ -117,6 +117,30 @@ export async function personalApi(request, env, url, searchHandler) {
     if(existing?.status==="Submitted")return response({error:"Already submitted; duplicate blocked"},409);
     return response({jobId:job.id,job:{url:job.url,title:job.title,company:job.company},profile,verifiedZeroExperience:true,verifiedEnglish:true,verifiedIsraelEligibility:true,confirmedOpen:true,sourceEvidence:{zeroExperience:evidence.evidence,sourceUrl:evidence.source_url,language:job.language_evidence,eligibility:job.eligibility_evidence,open:job.verification_status},note:"Private, authenticated handoff. Browser executor must independently check the employer page. No submission occurred."});
   }
+  if (path === "/api/private/recruitment/application-executor/receipt" && method === "POST") {
+    const raw=await request.text();if(raw.length>12000)return response({error:"Receipt too large"},413);
+    let body;try{body=JSON.parse(raw)}catch{return response({error:"Invalid JSON"},400)}
+    if(!body||typeof body.jobId!=="string"||typeof body.id!=="string"||!/^[-a-f0-9]{36}$/i.test(body.id)||!["Prepared","Needs review","Submitted"].includes(body.status)||typeof body.jobUrl!=="string")return response({error:"Invalid receipt"},400);
+    const job=await env.DB.prepare("SELECT * FROM recruitment_jobs WHERE id=?").bind(body.jobId).first();
+    if(!job)return response({error:"Job not found"},404);
+    if(body.jobUrl!==job.url)return response({error:"Receipt URL does not match the verified employer vacancy"},409);
+    if(["linkedin","indeed"].includes(routeApplication(job.url).channel))return response({error:"Employer-side vacancy URL required"},409);
+    const queue=await env.DB.prepare("SELECT * FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
+    if(!queue)return response({error:"Queue job before uploading receipt"},409);
+    if(queue.status==="Submitted")return response({error:"Already submitted; duplicate receipt rejected"},409);
+    const confirmation=typeof body.confirmation==="string"?body.confirmation.slice(0,1000):"";
+    const confirmationUrl=typeof body.confirmationPage==="string"?body.confirmationPage.slice(0,1000):"";
+    if(body.status==="Submitted"&&(!confirmation||!/^https:\/\//.test(confirmationUrl)))return response({error:"Submitted receipt requires employer confirmation text and HTTPS confirmation page"},400);
+    const existing=await env.DB.prepare("SELECT id FROM recruitment_application_receipts WHERE id=?").bind(body.id).first();
+    if(existing)return response({ok:true,alreadyReceived:true,reviewRequired:true});
+    await env.DB.prepare("INSERT INTO recruitment_application_receipts(id,job_id,queue_id,executor_status,confirmation_text,confirmation_url,employer_job_url) VALUES(?,?,?,?,?,?,?)").bind(body.id,job.id,queue.id,body.status,confirmation,confirmationUrl,body.jobUrl).run();
+    await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Browser receipt received',?)").bind(crypto.randomUUID(),queue.id,"Receipt "+body.id+" pending verification").run();
+    return response({ok:true,receiptId:body.id,reviewRequired:true,submitted:false},202);
+  }
+  if (path === "/api/private/recruitment/application-executor/receipts" && method === "GET") {
+    const rows=await env.DB.prepare("SELECT r.id,r.job_id,r.executor_status,r.confirmation_text,r.confirmation_url,r.received_at,r.review_status,j.title,j.company FROM recruitment_application_receipts r JOIN recruitment_jobs j ON j.id=r.job_id ORDER BY r.received_at DESC LIMIT 100").all();
+    return response({receipts:rows.results||[],note:"Receipts are unverified and do not count as confirmed submissions"});
+  }
   // Application automation is deliberately disabled until an authorized submission
   // adapter is installed. A queued item must never be represented as submitted.
   if (path === "/api/private/recruitment/application-executor/run" && method === "POST") {
