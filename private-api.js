@@ -54,7 +54,7 @@ export async function personalApi(request, env, url, searchHandler) {
   }
   // Dedicated machine credential: read-only access to screened job handoffs.
   // Never authorize profile edits, queue mutations, or application submission with this key.
-  const machinePaths=new Set(["/api/private/recruitment/application-executor/handoff","/api/private/recruitment/application-executor/receipt","/api/private/recruitment/application-executor/next"]);
+  const machinePaths=new Set(["/api/private/recruitment/application-executor/handoff","/api/private/recruitment/application-executor/receipt","/api/private/recruitment/application-executor/next","/api/private/recruitment/discover"]);
   let machineAuthorized=false;
   if(machinePaths.has(path)&&method==="POST"&&env.CAREERFINDER_AUTOMATION_KEY){
     const supplied=request.headers.get("X-CareerFinder-Automation-Key")||"";
@@ -87,6 +87,28 @@ export async function personalApi(request, env, url, searchHandler) {
     if (!validProfile(body.profile)) return response({error:"Invalid profile fields"},400);
     await env.DB.prepare("INSERT INTO personal_profile(id,profile_json,updated_at) VALUES(1,?,CURRENT_TIMESTAMP) ON CONFLICT(id) DO UPDATE SET profile_json=excluded.profile_json,updated_at=CURRENT_TIMESTAMP").bind(JSON.stringify(body.profile)).run();
     return response({ok:true});
+  }
+  if (path === "/api/private/recruitment/discover" && method === "POST") {
+    // Scheduled public-feed discovery, not application authorization.
+    const saved=await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
+    if(!saved)return response({error:"Save a cloud profile before enabling discovery"},409);
+    let profile;try{profile=JSON.parse(saved.profile_json)}catch{return response({error:"Invalid saved profile"},500)}
+    const found=await searchHandler(profile);
+    if(!found.ok)return found;
+    const data=await found.json();
+    const jobs=(data.jobs||[]).slice(0,30);
+    let stored=0,skipped=0;
+    for(const j of jobs){
+      if(!j.title||!j.company||!/^https:\/\//i.test(j.url||"")||!zeroExperienceEvidence(j)){skipped++;continue}
+      const channel=routeApplication(j.url);
+      const id=crypto.randomUUID();
+      const result=await env.DB.prepare("INSERT INTO recruitment_jobs(id,url,title,company,location,work_arrangement,employment_type,salary,match_score,match_reason,language_evidence,eligibility_evidence,verification_status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING").bind(id,j.url,String(j.title).slice(0,250),String(j.company).slice(0,250),String(j.location||"").slice(0,250),String(j.workArrangement||"").slice(0,80),String(j.employmentType||"").slice(0,80),String(j.salary||"").slice(0,120),Number(j.matchScore)||null,String(j.matchReason||"").slice(0,2500),"Not confirmed — requires employer verification","Not confirmed — requires employer verification","Unverified",String(j.source||channel.channel).slice(0,150)).run();
+      if(result.meta?.changes){
+        await env.DB.prepare("INSERT INTO recruitment_zero_experience_evidence(job_url,evidence,source_url) VALUES(?,?,?) ON CONFLICT(job_url) DO NOTHING").bind(j.url,String(j.zeroExperienceEvidence).slice(0,1500),String(j.zeroExperienceSourceUrl||j.url).slice(0,1000)).run();
+        stored++;
+      }else skipped++;
+    }
+    return response({ok:true,found:jobs.length,stored,skipped,automaticSubmission:false,verificationRequired:true});
   }
   if (path === "/api/private/recruitment/jobs" && method === "GET") {
     const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url ORDER BY j.discovered_at DESC LIMIT 500").all();
