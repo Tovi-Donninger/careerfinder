@@ -27,7 +27,7 @@ for(const j of jobs){
  if(!j.title||!j.company||!/^https:\/\//i.test(j.url||"")){diagnostics.invalid++;continue}
  const key=j.url.split("?")[0].toLowerCase();if(seen.has(key)){diagnostics.duplicate++;continue}seen.add(key);
  const s=score(j,body),title=j.title.toLowerCase();
- const relevant=terms.length?terms.some(t=>title.includes(t)):TARGET.some(t=>title.includes(t));
+ const relevant=TARGET.some(t=>title.includes(t))||terms.some(t=>title.includes(t))||/\b(office assistant|office coordinator|recruiting coordinator|talent coordinator|account executive|sales development|customer service|client services|administrative assistant|data entry|order processing|inventory assistant|warehouse coordinator)\b/i.test(j.title);
  if(!relevant){diagnostics.roleMismatch++;continue}
  const locationOK=allowedLocation(j);
  if(!locationOK)diagnostics.locationOrLanguage++;
