@@ -1,3 +1,4 @@
+import { assessApplication, executeApplication } from "./application-executor.js";
 import { zeroExperienceEvidence } from "./zero-experience.js";
 // Personal workspace API. Mount only after configuring D1 and ADMIN_PASSWORD_HASH.
 // Password hash format: PBKDF2 SHA-256 with 100000 iterations, base64 salt and digest.
@@ -100,6 +101,24 @@ export async function personalApi(request, env, url, searchHandler) {
   }
   // Application automation is deliberately disabled until an authorized submission
   // adapter is installed. A queued item must never be represented as submitted.
+  if (path === "/api/private/recruitment/application-executor/run" && method === "POST") {
+    let body;try{body=await request.json()}catch{return response({error:"Invalid JSON"},400)}
+    if(typeof body?.jobId!=="string"||body.jobId.length>100)return response({error:"jobId required"},400);
+    const job=await env.DB.prepare("SELECT * FROM recruitment_jobs WHERE id=?").bind(body.jobId).first();
+    if(!job)return response({error:"Job not found"},404);
+    const evidence=await env.DB.prepare("SELECT * FROM recruitment_zero_experience_evidence WHERE job_url=?").bind(job.url).first();
+    const policy=await env.DB.prepare("SELECT * FROM recruitment_application_policy WHERE id=1").first();
+    const row=await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
+    let profile=null;try{profile=row?JSON.parse(row.profile_json):null}catch{}
+    const assessment=await assessApplication(job,evidence,profile,policy);
+    const executor=assessment.eligible?await executeApplication():{submitted:false,status:"Blocked",reason:assessment.reasons.join("; ")};
+    // Never persist 'Submitted' without a verified external reference.
+    const id=crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Blocked',?) ON CONFLICT(job_id) DO UPDATE SET status=CASE WHEN recruitment_application_queue.status='Submitted' THEN 'Submitted' ELSE 'Blocked' END,reason=CASE WHEN recruitment_application_queue.status='Submitted' THEN recruitment_application_queue.reason ELSE excluded.reason END,updated_at=CURRENT_TIMESTAMP").bind(id,job.id,executor.reason).run();
+    const record=await env.DB.prepare("SELECT * FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
+    await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Submission blocked',?)").bind(crypto.randomUUID(),record.id,executor.reason).run();
+    return response({submitted:false,status:"Blocked",reasons:assessment.reasons,reason:executor.reason,adapterConfigured:false});
+  }
   if (path === "/api/private/recruitment/submitted-applications" && method === "GET") {
     // Only application executor records with an external confirmation may appear here.
     // Manual entries and unsubmitted queue items are intentionally excluded.
