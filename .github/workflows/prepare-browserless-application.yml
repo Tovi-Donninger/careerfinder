@@ -29,7 +29,12 @@ jobs:
           node-version: '22'
       - name: Test employer vacancy verification
         run: node --test scripts/vacancy-verification.test.mjs
+      - name: Check discovery credential
+        env:
+          CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
+        run: test -n "$CAREERFINDER_AUTOMATION_KEY" || { echo "::error::Missing CAREERFINDER_AUTOMATION_KEY"; exit 1; }
       - name: Check private credentials
+        if: steps.select.outputs.job_id != ''
         env:
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
@@ -64,7 +69,7 @@ jobs:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
           CAREERFINDER_CV_BASE64: ${{ secrets.CAREERFINDER_CV_BASE64 }}
           JOB_ID: ${{ steps.select.outputs.job_id }}
-          AUTO_SUBMIT: ${{ inputs.auto_submit == true && vars.CAREERFINDER_ENABLE_AUTO_SUBMIT == 'true' }}
+          AUTO_SUBMIT: ${{ vars.CAREERFINDER_ENABLE_AUTO_SUBMIT == 'true' && (github.event_name == 'schedule' || inputs.auto_submit == true) }}
           CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP: '900'
           CAREERFINDER_BROWSER_RESERVE_UNITS: '4'
         shell: bash
