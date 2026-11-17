@@ -54,9 +54,9 @@ export async function personalApi(request, env, url, searchHandler) {
   }
   // Dedicated machine credential: read-only access to screened job handoffs.
   // Never authorize profile edits, queue mutations, or application submission with this key.
-  const machinePath="/api/private/recruitment/application-executor/handoff";
+  const machinePaths=new Set(["/api/private/recruitment/application-executor/handoff","/api/private/recruitment/application-executor/receipt"]);
   let machineAuthorized=false;
-  if(path===machinePath&&method==="POST"&&env.CAREERFINDER_AUTOMATION_KEY){
+  if(machinePaths.has(path)&&method==="POST"&&env.CAREERFINDER_AUTOMATION_KEY){
     const supplied=request.headers.get("X-CareerFinder-Automation-Key")||"";
     if(/^[a-f0-9]{64}$/.test(supplied)&&/^[a-f0-9]{64}$/.test(env.CAREERFINDER_AUTOMATION_KEY)){
       const a=encoder.encode(supplied),b=encoder.encode(env.CAREERFINDER_AUTOMATION_KEY);
@@ -147,6 +147,10 @@ export async function personalApi(request, env, url, searchHandler) {
     if(existing)return response({ok:true,alreadyReceived:true,reviewRequired:true});
     await env.DB.prepare("INSERT INTO recruitment_application_receipts(id,job_id,queue_id,executor_status,confirmation_text,confirmation_url,employer_job_url) VALUES(?,?,?,?,?,?,?)").bind(body.id,job.id,queue.id,body.status,confirmation,confirmationUrl,body.jobUrl).run();
     await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Browser receipt received',?)").bind(crypto.randomUUID(),queue.id,"Receipt "+body.id+" pending verification").run();
+    if(body.status==="Needs review"||body.status==="Prepared"){
+      const reason=typeof body.reason==="string"?body.reason.slice(0,1500):"Browser application requires manual attention";
+      await env.DB.prepare("UPDATE recruitment_application_queue SET status='Needs review',reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='Submitted'").bind(reason,queue.id).run();
+    }
     return response({ok:true,receiptId:body.id,reviewRequired:true,submitted:false},202);
   }
   if (path === "/api/private/recruitment/application-executor/receipts" && method === "GET") {
