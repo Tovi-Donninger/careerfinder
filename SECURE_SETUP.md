@@ -24,8 +24,8 @@ Generate a random salt and PBKDF2-SHA256 hash locally, using this Python snippet
 import os,hashlib,base64,getpass
 password=getpass.getpass("Choose a strong CareerFinder password: ").encode()
 salt=os.urandom(16)
-digest=hashlib.pbkdf2_hmac("sha256",password,salt,210000,32)
-print("210000:"+base64.b64encode(salt).decode()+":"+base64.b64encode(digest).decode())
+digest=hashlib.pbkdf2_hmac("sha256",password,salt,100000,32)
+print("100000:"+base64.b64encode(salt).decode()+":"+base64.b64encode(digest).decode())
 ```
 
 In Cloudflare Worker settings → Variables and Secrets, create an encrypted secret named `ADMIN_PASSWORD_HASH` with the generated value. Do not use a plain-text password as the secret.
