@@ -19,13 +19,15 @@ if(/(^|\.)(linkedin\.com|indeed\.com|indeed\.co\.[a-z]{2})$/i.test(url.hostname)
 if(!application.verifiedZeroExperience||!application.verifiedEnglish||!application.verifiedIsraelEligibility||!application.confirmedOpen)throw Error("Mandatory vacancy eligibility checks have not been independently verified");
 const submit=args.includes("--submit");
 // Conservative local unit reservation; counts attempted sessions, not provider-billed usage.
+const token=process.env.BROWSERLESS_TOKEN;
 const monthlyCap=Number(process.env.CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP||900);
 const perSessionReserve=Number(process.env.CAREERFINDER_BROWSER_RESERVE_UNITS||4);
 if(!Number.isSafeInteger(monthlyCap)||monthlyCap<1||!Number.isSafeInteger(perSessionReserve)||perSessionReserve<1)throw Error("Invalid browser budget configuration");
 const month=new Date().toISOString().slice(0,7);
-await mkdir(".careerfinder-private",{recursive:true});
+if(token)await mkdir(".careerfinder-private",{recursive:true});
 const budgetPath=".careerfinder-private/browser-budget-"+month+".json";
 const lockPath=".careerfinder-private/browser-budget-"+month+".lock";
+if(token){
 let lock;
 try{lock=await open(lockPath,"wx",0o600)}catch{throw Error("Browser budget lock is busy; do not start parallel sessions")}
 let spent=0;
@@ -34,7 +36,7 @@ try{
  if(spent+perSessionReserve>monthlyCap)throw Error("Monthly browser budget exhausted; queued applications must wait");
  await writeFile(budgetPath,JSON.stringify({month,reservedUnits:spent+perSessionReserve,cap:monthlyCap,updatedAt:new Date().toISOString()}),{mode:0o600});
 }finally{await lock.close();await (await import("node:fs/promises")).unlink(lockPath).catch(()=>{})}
-const token=process.env.BROWSERLESS_TOKEN;
+}
 const browser=token
  ? await chromium.connectOverCDP((process.env.BROWSERLESS_WS_ENDPOINT||"wss://production-ams.browserless.io").replace(/\\/$/,"")+"?token="+encodeURIComponent(token))
  : await chromium.launch({headless:!args.includes("--visible")});
