@@ -38,7 +38,7 @@ jobs:
         env:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
         run: node scripts/discover-vacancies.mjs
-      - name: Precheck employer vacancy pages in review queue
+      - name: AI review employer vacancy pages against saved CV
         if: inputs.job_id == ''
         env:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
