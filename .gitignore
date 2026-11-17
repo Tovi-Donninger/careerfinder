@@ -6,3 +6,5 @@ private-application*.json
 .env.*
 playwright-report/
 test-results/
+
+.careerfinder-private/
