@@ -5,6 +5,7 @@ import { chromium } from "playwright-core";
 import { readFile, writeFile, mkdir, open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { inspectVacancy } from "./vacancy-verification.mjs";
 
 const args=process.argv.slice(2);
 const value=flag=>{const i=args.indexOf(flag);return i>=0?args[i+1]:undefined};
@@ -55,6 +56,8 @@ try{
  const text=(await page.locator("body").innerText()).slice(0,25000);
  if(/captcha|verify you are human|cloudflare challenge|security check/i.test(text))throw Error("Human verification required");
  if(/no longer accepting applications|position has been filled|job is closed|applications are closed/i.test(text))throw Error("Vacancy is closed");
+ const inspection=inspectVacancy({pageText:text,title:job.title,company:job.company,sourceEvidence:application.sourceEvidence});
+ if(!inspection.verified)throw Error("Employer vacancy verification requires review: "+inspection.failures.join("; "));
  await fill(['input[autocomplete="given-name"]','input[name="first_name"]','input[name="firstName"]','input[id*="first_name"]'],profile.firstName);
  await fill(['input[autocomplete="family-name"]','input[name="last_name"]','input[name="lastName"]','input[id*="last_name"]'],profile.lastName);
  await fill(['input[autocomplete="email"]','input[type="email"]','input[name="email"]'],profile.email);
