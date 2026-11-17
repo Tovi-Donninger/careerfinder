@@ -162,13 +162,13 @@ export async function personalApi(request, env, url, searchHandler) {
     const saved=await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
     if(!saved)return response({error:"Save a cloud candidate profile before AI verification"},409);
     let profile;try{profile=JSON.parse(saved.profile_json)}catch{return response({error:"Invalid saved candidate profile"},500)}
-    const rows=await env.DB.prepare("SELECT q.id AS queue_id,j.id AS job_id,j.url,j.title,j.company,j.location,q.reason FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Needs review' AND (q.reason IS NULL OR q.reason NOT LIKE 'AI assessment (%') ORDER BY q.updated_at DESC LIMIT 3").all();
+    const rows=await env.DB.prepare("SELECT q.id AS queue_id,j.id AS job_id,j.url,j.title,j.company,j.location,q.reason FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Needs review' AND (q.reason IS NULL OR q.reason NOT LIKE 'AI assessment (%' AND q.reason NOT LIKE 'AI assessment JSON:%') ORDER BY q.updated_at DESC LIMIT 3").all();
     const results=[];
     for(const job of rows.results||[]){
       let parsed;
       try{parsed=new URL(job.url);if(parsed.protocol!=="https:"||parsed.port||parsed.username||parsed.password)throw Error("Invalid URL")}catch{results.push({title:job.title,result:"Needs review: invalid URL"});continue}
       const host=parsed.hostname.toLowerCase();
-      if(!["boards.greenhouse.io","job-boards.greenhouse.io","jobs.lever.co","jobs.ashbyhq.com","remotive.com","www.remotive.com","remoteok.com","www.remoteok.com","arbeitnow.com","www.arbeitnow.com"].includes(host)){results.push({title:job.title,result:"Needs review: host not on the trusted job-source list"});continue}
+      if(!["boards.greenhouse.io","job-boards.greenhouse.io","jobs.lever.co","jobs.ashbyhq.com","remotive.com","www.remotive.com","remoteok.com","www.remoteok.com","arbeitnow.com","www.arbeitnow.com","jobs.smartrecruiters.com","apply.workable.com","jobs.workable.com","jobs.jobvite.com","www.linkedin.com","www.indeed.com","wellfound.com","www.wellfound.com"].includes(host)||host.endsWith(".myworkdayjobs.com")||host.endsWith(".bamboohr.com")){results.push({title:job.title,result:"Needs review: host not on the trusted job-source list"});continue}
       try{
         const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
         let page;
@@ -194,8 +194,9 @@ export async function personalApi(request, env, url, searchHandler) {
         }
         if(!["suitable","unsuitable","needs_review"].includes(assessment.decision)||!Number.isInteger(assessment.score)||assessment.score<0||assessment.score>100||!Array.isArray(assessment.blockers)||!Array.isArray(assessment.evidence))throw Error("AI response did not match required assessment schema");
         const clean=s=>String(s||"").replace(/\s+/g," ").slice(0,260);
-        const note="AI assessment ("+new Date().toISOString().slice(0,10)+"): "+assessment.decision+"; score "+assessment.score+"/100; "+clean(assessment.summary)+"; experience: "+clean(assessment.experience)+"; language: "+clean(assessment.language)+"; Israel: "+clean(assessment.israelEligibility)+"; opening: "+clean(assessment.opening)+"; blockers: "+assessment.blockers.slice(0,4).map(clean).join(" | ")+". Requires independent confirmation before submission.";
-        await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='Needs review'").bind(note.slice(0,1500),job.queue_id).run();
+        const record={decision:assessment.decision,score:assessment.score,summary:clean(assessment.summary),experience:clean(assessment.experience),language:clean(assessment.language),israelEligibility:clean(assessment.israelEligibility),opening:clean(assessment.opening),blockers:assessment.blockers.slice(0,6).map(clean),evidence:assessment.evidence.slice(0,4).map(clean),assessedAt:new Date().toISOString()};
+        const note="AI assessment JSON:"+JSON.stringify(record);
+        await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='Needs review'").bind(note.slice(0,6000),job.queue_id).run();
         results.push({jobId:job.job_id,title:job.title,result:assessment.decision,score:assessment.score,summary:assessment.summary,blockers:assessment.blockers,evidence:assessment.evidence.slice(0,5)});
       }catch(e){results.push({jobId:job.job_id,title:job.title,result:"Needs review: AI assessment could not complete",error:String(e.message||e).slice(0,160)})}
     }
@@ -299,7 +300,10 @@ export async function personalApi(request, env, url, searchHandler) {
       const locationMatch=reason.match(/(?:location|remote-from-Israel)/i);
       const unsuitable=/\\b(lead technical recruiter|senior|director|head of|principal|staff engineer)\\b/i.test(j.title||"")||/\\b(berlin|london|france|germany|united kingdom)\\b/i.test(url);
       const priority=unsuitable?"Low — likely unsuitable":locationMatch?"Check Israel eligibility":"Check experience requirements";
-      return {...j,channel:routeApplication(j.url),reviewPriority:priority,likelyUnsuitable:unsuitable};
+      let aiAssessment=null;
+      if(reason.startsWith("AI assessment JSON:")){try{aiAssessment=JSON.parse(reason.slice("AI assessment JSON:".length))}catch{}}
+      else if(reason.startsWith("AI assessment (")){const m=reason.match(/AI assessment [(][^)]*[)]: (suitable|unsuitable|needs_review); score ([0-9]+)\/100; ([^;]*)/);if(m)aiAssessment={decision:m[1],score:Number(m[2]),summary:m[3],blockers:[],evidence:[]}}
+      return {...j,aiAssessment,channel:routeApplication(j.url),reviewPriority:aiAssessment?(aiAssessment.decision==="suitable"?"AI suitable — verify before applying":aiAssessment.decision==="unsuitable"?"AI unsuitable":"AI needs review"):priority,likelyUnsuitable:aiAssessment?aiAssessment.decision==="unsuitable":unsuitable};
     });
     return response({items,automaticSubmissionAvailable:false});
   }
