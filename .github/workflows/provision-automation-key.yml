@@ -1,0 +1,35 @@
+name: Provision permanent CareerFinder automation credential
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate required secrets
+        env:
+          CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Cloudflare deployment secrets missing"; exit 1; }
+          [[ "$CAREERFINDER_AUTOMATION_KEY" =~ ^[a-f0-9]{64}$ ]] || { echo "::error::Automation key must be 64 lowercase hexadecimal characters"; exit 1; }
+      - name: Install Wrangler
+        run: npm install --no-save wrangler@4
+      - name: Provision Worker automation key without printing it
+        env:
+          CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$CAREERFINDER_AUTOMATION_KEY" | npx wrangler secret put CAREERFINDER_AUTOMATION_KEY
+          echo "Dedicated CareerFinder machine credential provisioned. Re-run to rotate after updating GitHub secret."
