@@ -114,7 +114,7 @@ export async function personalApi(request, env, url, searchHandler) {
         }
       }else skipped++;
     }
-    return response({ok:true,found:jobs.length,stored,skipped,automaticSubmission:false,verificationRequired:true});
+    return response({ok:true,found:jobs.length,stored,skipped,reviewCandidates:(data.reviewCandidates||[]).slice(0,10),diagnostics:data.diagnostics||{},sourceDiagnostics:data.sourceDiagnostics||[],errors:data.errors||[],automaticSubmission:false,verificationRequired:true});
   }
   if (path === "/api/private/recruitment/jobs" && method === "GET") {
     const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url ORDER BY j.discovered_at DESC LIMIT 500").all();
