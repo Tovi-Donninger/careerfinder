@@ -73,3 +73,24 @@ node scripts/upload-application-receipt.mjs application-receipts/RECEIPT_ID.json
 This calls the authenticated `/api/private/recruitment/application-executor/receipt` endpoint. Receipts are stored in `recruitment_application_receipts` as **Pending review** and may be viewed via `GET /api/private/recruitment/application-executor/receipts`. Uploading a receipt **does not mark the job Submitted** and does not increase the confirmed-submissions count.
 
 The Cloudflare deployment workflow now applies `migrations/0005_application_receipts.sql`. Deployment and end-to-end testing remain unverified. The browser executor is still local; there is no deployed browser worker, automated employer form submission service, or independently verified receipt ingestion. Do not use this to claim automatic submissions are live.
+
+
+## Browserless hosted-browser connection and conservative budget (new)
+
+Set `BROWSERLESS_TOKEN` as a private environment variable on the machine running the executor. Never put the token in GitHub source, an application JSON file, or a public website. With the token set, the executor connects to the Browserless Amsterdam WebSocket endpoint using Playwright CDP instead of launching a local browser. The executor code still runs **on your machine**, not in Browserless; Browserless hosts only the interactive browser.
+
+Optional private environment variables:
+
+- `BROWSERLESS_WS_ENDPOINT`: WebSocket endpoint from your Browserless account (default `wss://production-ams.browserless.io`).
+- `CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP`: conservative per-device monthly reservation cap (default 900).
+- `CAREERFINDER_BROWSER_RESERVE_UNITS`: units reserved before each attempted hosted session (default 4).
+
+The reservation ledger is saved in `.careerfinder-private/` and excluded from Git. It resets to a new ledger each UTC month. The cap is **not** an authoritative provider usage monitor: it does not read Browserless billing, handle multiple machines, guarantee a fixed duration, or prevent overage charges on a paid account. Configure spending restrictions in your provider account independently. Do not run multiple independent executors against the same provider token without a shared central budget.
+
+Example on a trusted shell after privately setting the token:
+
+```bash
+node scripts/employer-form-executor.mjs --application private-application.json
+```
+
+Do not add `--submit` for the initial connection test. The provider account and API token must be created by the account owner. No token has been configured or browser session verified in production.
