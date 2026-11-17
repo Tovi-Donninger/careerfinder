@@ -1,3 +1,4 @@
+import { personalApi } from "./private-api.js";
 const cors = {
   "Access-Control-Allow-Origin": "https://tovi-donninger.github.io",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -296,10 +297,11 @@ async function analyse(env, body) {
 export default {
   async fetch(request, env) {
     try {
-      if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
+      if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { ...cors, "Access-Control-Allow-Headers": "Content-Type, Authorization", "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS" } });
       const origin = request.headers.get("Origin") || "";
       if (origin && origin !== "https://tovi-donninger.github.io" && !origin.startsWith("http://localhost:")) return json({ error: "Origin not allowed." }, 403);
       const url = new URL(request.url);
+      if (url.pathname.startsWith("/api/private/")) return await personalApi(request, env, url);
       if (request.method === "GET" && url.pathname === "/") return json({ status: "online", service: "CareerFinder OpenAI job search", endpoints: ["/api/analyse", "/api/search"] });
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
       let body;

@@ -5,5 +5,12 @@
   "compatibility_date": "2026-11-04",
   "ai": {
     "binding": "AI"
-  }
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "careerfinder-ai",
+      "database_id": "4ca5f3d7-6d27-4863-a973-be8a9bf10e8e"
+    }
+  ]
 }
