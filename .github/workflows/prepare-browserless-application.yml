@@ -38,6 +38,11 @@ jobs:
         env:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
         run: node scripts/discover-vacancies.mjs
+      - name: Precheck employer vacancy pages in review queue
+        if: inputs.job_id == ''
+        env:
+          CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
+        run: node scripts/verify-queued-vacancies.mjs
       - name: Select next employer vacancy when no job ID was supplied
         id: select
         env:
