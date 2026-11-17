@@ -38,6 +38,8 @@ try{
  // Never invent answers to screening, work authorization, compensation or consent questions.
  const required=await page.locator('input[required],select[required],textarea[required]').evaluateAll(nodes=>nodes.filter(el=>!el.disabled&&!el.value&&!["hidden","submit","checkbox","radio","file"].includes(el.type)).map(el=>el.name||el.id||"unnamed required field"));
  if(required.length)throw Error("Required questions need review: "+required.slice(0,12).join(", "));
+ const unchecked=await page.locator('input[type="checkbox"][required],input[type="radio"][required]').evaluateAll(nodes=>nodes.filter(el=>!el.checked).map(el=>el.name||el.id||"required selection"));
+ if(unchecked.length)throw Error("Required selections or consent need review: "+unchecked.slice(0,12).join(", "));
  if(!submit){receipt.status="Prepared";receipt.reason="Form prepared for review; rerun with --submit after inspecting it";}
  if(submit){
  const buttons=page.getByRole("button",{name:/^(submit application|send application|apply now|submit)$/i});
