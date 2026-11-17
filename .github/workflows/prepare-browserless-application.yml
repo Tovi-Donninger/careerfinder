@@ -1,4 +1,4 @@
-name: Prepare CareerFinder application in Browserless (no submission)
+name: CareerFinder Browserless application (prepare or verified auto-submit)
 on:
   workflow_dispatch:
     inputs:
@@ -6,6 +6,11 @@ on:
         description: 'Exact CareerFinder private job ID'
         required: true
         type: string
+      auto_submit:
+        description: 'Submit only if all verification checks and employer form requirements pass; otherwise stop for review'
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -37,6 +42,7 @@ jobs:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
           CAREERFINDER_CV_BASE64: ${{ secrets.CAREERFINDER_CV_BASE64 }}
           JOB_ID: ${{ inputs.job_id }}
+          AUTO_SUBMIT: ${{ inputs.auto_submit }}
           CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP: '900'
           CAREERFINDER_BROWSER_RESERVE_UNITS: '4'
         shell: bash
@@ -47,5 +53,9 @@ jobs:
           printf '%s' "$CAREERFINDER_CV_BASE64" | base64 --decode > /tmp/careerfinder-cv.pdf
           test -s /tmp/careerfinder-cv.pdf
           node scripts/fetch-application-handoff.mjs "$JOB_ID" /tmp/careerfinder-cv.pdf
-          node scripts/employer-form-executor.mjs --application "private-application-${JOB_ID//[^a-zA-Z0-9_-]/}.json"
-          echo "Preparation completed without submission. Private screenshots and receipts deleted on runner exit."
+          if [[ "$AUTO_SUBMIT" == "true" ]]; then
+            node scripts/employer-form-executor.mjs --application "private-application-${JOB_ID//[^a-zA-Z0-9_-]/}.json" --submit --confirm-authorized
+          else
+            node scripts/employer-form-executor.mjs --application "private-application-${JOB_ID//[^a-zA-Z0-9_-]/}.json"
+          fi
+          echo "Browser session ended. Check runner output for actual submission confirmation; never infer submission from workflow success."
