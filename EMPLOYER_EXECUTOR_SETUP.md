@@ -44,3 +44,19 @@ node scripts/employer-form-executor.mjs --application private-application.json -
 **Limitations:** The runner currently supports common text fields and the first file input only; it does not complete employer-specific screening questions, custom widgets, authentication, consent, multi-step flows or CAPTCHA. It does not integrate with the Cloudflare application queue, verify a confirmation with an external provider, or update the live Submitted dashboard. A positive confirmation is recorded locally only when recognized on the employer page. Avoid rerunning a potentially submitted application until its status has been checked, to prevent duplicates. Do not share application JSON or screenshots.
 
 Next engineering tasks: authenticated one-time job handoff, signed receipt ingestion, employer-specific form adapters, verified source-to-employer matching, rate limits, retries with idempotency, and a hosted browser runtime with secure private-document storage. These are not implemented yet.
+
+
+## Authenticated CareerFinder handoff (new)
+
+After signing in, obtain your temporary 12-hour session token securely. Do not put it in a command history or share it with anyone. On your own computer, set the environment variable `CAREERFINDER_SESSION_TOKEN` through a secure shell mechanism and run:
+
+```bash
+node scripts/fetch-application-handoff.mjs JOB_ID /absolute/path/to/your-cv.pdf
+node scripts/employer-form-executor.mjs --application private-application-JOB_ID.json --visible
+```
+
+The handoff requires the job to exist in the private D1 recruitment database and pass the current eligibility screening. Jobs discovered only on LinkedIn or Indeed must first be matched to their identical employer-side posting and stored with that exact URL. The CV file must already exist on the local computer.
+
+This integration is a **manual authenticated handoff**, not a hosted scheduled executor. The prototype does not upload receipts to D1 or mark jobs submitted in the dashboard. Submission remains a separately authorized command, and no production browser runner is deployed.
+
+**Security note:** The handoff includes private profile data and must be kept on a trusted device; delete the local JSON and screenshots when no longer needed. The current eligibility evidence is recorded screening data, not an independent live check of the employer posting.
