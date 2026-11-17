@@ -1,5 +1,5 @@
 // Personal workspace API. Mount only after configuring D1 and ADMIN_PASSWORD_HASH.
-// Password hash format: PBKDF2 SHA-256 with 210000 iterations, base64 salt and digest.
+// Password hash format: PBKDF2 SHA-256 with 100000 iterations, base64 salt and digest.
 const AUTH_ORIGIN = "https://tovi-donninger.github.io";
 const encoder = new TextEncoder();
 const hex = bytes => [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
@@ -7,9 +7,9 @@ async function sha256(text) { return hex(new Uint8Array(await crypto.subtle.dige
 function b64bytes(value) { return Uint8Array.from(atob(value), c => c.charCodeAt(0)); }
 async function checkPassword(password, config) {
   const [iterations, salt, expected] = String(config || "").split(":");
-  if (iterations !== "210000" || !salt || !expected || password.length > 1024) return false;
+  if (iterations !== "100000" || !salt || !expected || password.length > 1024) return false;
   const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: b64bytes(salt), iterations: 210000, hash: "SHA-256" }, key, 256));
+  const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: b64bytes(salt), iterations: 100000, hash: "SHA-256" }, key, 256));
   const expectedBytes = b64bytes(expected);
   let difference = bits.length ^ expectedBytes.length;
   for (let i = 0; i < bits.length; i++) difference |= bits[i] ^ (expectedBytes[i] || 0);
