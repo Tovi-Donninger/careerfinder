@@ -175,7 +175,7 @@ export async function personalApi(request, env, url, searchHandler) {
         try{page=await fetch(job.url,{redirect:"manual",headers:{Accept:"text/html"},signal:controller.signal})}finally{clearTimeout(timeout)}
         if(!page.ok||!(page.headers.get("content-type")||"").includes("text/html"))throw Error("Employer page unavailable or not HTML (HTTP "+page.status+")");
         const html=(await page.text()).slice(0,180000);
-        const description=html.replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi," ").replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi," ").replace(/<[^>]*>/g," ").replace(/&(?:nbsp|amp|quot|#39);/g," ").replace(/\\s+/g," ").slice(0,22000);
+        const description=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi," ").replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi," ").replace(/<[^>]*>/g," ").replace(/&(?:nbsp|amp|quot|#39);/g," ").replace(/\s+/g," ").slice(0,22000);
         if(description.length<150)throw Error("Insufficient readable employer vacancy text");
         const candidate={location:[profile.city,profile.country].filter(Boolean).join(", "),roles:profile.roles,education:profile.education,experience:profile.experience,skills:profile.skills,minimumSalary:profile.minimumSalary,cv:String(profile.cv||"").slice(0,10000)};
         const prompt=[
@@ -188,12 +188,12 @@ export async function personalApi(request, env, url, searchHandler) {
         const raw=String(ai?.response||"").trim();
         let assessment;
         try{assessment=JSON.parse(raw)}catch{
-          const match=raw.match(/\\{[\\s\\S]*\\}/);
+          const match=raw.match(/\{[\s\S]*\}/);
           if(!match)throw Error("Workers AI did not return JSON");
           assessment=JSON.parse(match[0]);
         }
         if(!["suitable","unsuitable","needs_review"].includes(assessment.decision)||!Number.isInteger(assessment.score)||assessment.score<0||assessment.score>100||!Array.isArray(assessment.blockers)||!Array.isArray(assessment.evidence))throw Error("AI response did not match required assessment schema");
-        const clean=s=>String(s||"").replace(/\\s+/g," ").slice(0,260);
+        const clean=s=>String(s||"").replace(/\s+/g," ").slice(0,260);
         const note="AI assessment ("+new Date().toISOString().slice(0,10)+"): "+assessment.decision+"; score "+assessment.score+"/100; "+clean(assessment.summary)+"; experience: "+clean(assessment.experience)+"; language: "+clean(assessment.language)+"; Israel: "+clean(assessment.israelEligibility)+"; opening: "+clean(assessment.opening)+"; blockers: "+assessment.blockers.slice(0,4).map(clean).join(" | ")+". Requires independent confirmation before submission.";
         await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='Needs review'").bind(note.slice(0,1500),job.queue_id).run();
         results.push({jobId:job.job_id,title:job.title,result:assessment.decision,score:assessment.score,summary:assessment.summary,blockers:assessment.blockers,evidence:assessment.evidence.slice(0,5)});
