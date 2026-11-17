@@ -53,8 +53,8 @@ jobs:
           if len(password) < 16:
               raise SystemExit("CareerFinder login password must be at least 16 characters")
           salt = os.urandom(16)
-          digest = hashlib.pbkdf2_hmac("sha256", password, salt, 210000, 32)
-          print("210000:" + base64.b64encode(salt).decode() + ":" + base64.b64encode(digest).decode())
+          digest = hashlib.pbkdf2_hmac("sha256", password, salt, 100000, 32)
+          print("100000:" + base64.b64encode(salt).decode() + ":" + base64.b64encode(digest).decode())
           PY
           npx wrangler secret put ADMIN_PASSWORD_HASH < /tmp/careerfinder-password-hash
           rm -f /tmp/careerfinder-password-hash
