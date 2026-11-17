@@ -2,7 +2,7 @@
 // Requires explicit --submit approval; does not bypass access controls or CAPTCHA.
 // npm install --no-save playwright && npx playwright install chromium
 import { chromium } from "playwright";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -18,7 +18,27 @@ if(url.protocol!=="https:")throw Error("HTTPS employer vacancy URL required");
 if(/(^|\.)(linkedin\.com|indeed\.com|indeed\.co\.[a-z]{2})$/i.test(url.hostname))throw Error("Use the employer's official application page, not LinkedIn/Indeed");
 if(!application.verifiedZeroExperience||!application.verifiedEnglish||!application.verifiedIsraelEligibility||!application.confirmedOpen)throw Error("Mandatory vacancy eligibility checks have not been independently verified");
 const submit=args.includes("--submit");
-const browser=await chromium.launch({headless:!args.includes("--visible")});
+// Conservative local unit reservation; counts attempted sessions, not provider-billed usage.
+const monthlyCap=Number(process.env.CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP||900);
+const perSessionReserve=Number(process.env.CAREERFINDER_BROWSER_RESERVE_UNITS||4);
+if(!Number.isSafeInteger(monthlyCap)||monthlyCap<1||!Number.isSafeInteger(perSessionReserve)||perSessionReserve<1)throw Error("Invalid browser budget configuration");
+const month=new Date().toISOString().slice(0,7);
+await mkdir(".careerfinder-private",{recursive:true});
+const budgetPath=".careerfinder-private/browser-budget-"+month+".json";
+const lockPath=".careerfinder-private/browser-budget-"+month+".lock";
+let lock;
+try{lock=await open(lockPath,"wx",0o600)}catch{throw Error("Browser budget lock is busy; do not start parallel sessions")}
+let spent=0;
+try{
+ try{const prior=JSON.parse(await readFile(budgetPath,"utf8"));spent=Number(prior.reservedUnits)||0}catch{}
+ if(spent+perSessionReserve>monthlyCap)throw Error("Monthly browser budget exhausted; queued applications must wait");
+ await writeFile(budgetPath,JSON.stringify({month,reservedUnits:spent+perSessionReserve,cap:monthlyCap,updatedAt:new Date().toISOString()}),{mode:0o600});
+}finally{await lock.close();await (await import("node:fs/promises")).unlink(lockPath).catch(()=>{})}
+const token=process.env.BROWSERLESS_TOKEN;
+const browser=token
+ ? await chromium.connectOverCDP((process.env.BROWSERLESS_WS_ENDPOINT||"wss://production-ams.browserless.io").replace(/\\/$/,"")+"?token="+encodeURIComponent(token))
+ : await chromium.launch({headless:!args.includes("--visible")});
+
 const page=await browser.newPage({acceptDownloads:false});
 const receipt={id:randomUUID(),jobUrl:url.href,jobTitle:job.title||"",company:job.company||"",status:"Needs review",submitted:false,at:new Date().toISOString(),confirmation:""};
 const fill=async(selectors,value)=>{if(!value)return false;for(const selector of selectors){const loc=page.locator(selector).first();if(await loc.count()&&await loc.isVisible()&&await loc.isEnabled()){await loc.fill(String(value));return true}}return false};
