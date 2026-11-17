@@ -1,0 +1,9 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {inspectVacancy} from "./vacancy-verification.mjs";
+const base={title:"Junior HR Assistant",company:"Example Company",sourceEvidence:{language:"English required",eligibility:"Israel eligible"},pageText:"Example Company is hiring a Junior HR Assistant. No previous experience required. This is a full-time entry-level position in Tel Aviv, Israel. Apply to join our friendly HR team today."};
+test("accepts explicit employer evidence with consistent vacancy details",()=>assert.equal(inspectVacancy(base).verified,true));
+test("rejects closed vacancy",()=>assert.ok(inspectVacancy({...base,pageText:base.pageText+" This job is no longer available."}).failures.some(x=>x.includes("closed"))));
+test("rejects unverified eligibility",()=>assert.equal(inspectVacancy({...base,sourceEvidence:{language:"English requirement not confirmed",eligibility:"Israel eligible"}}).verified,false));
+test("rejects experience requirement without explicit zero-experience evidence",()=>assert.equal(inspectVacancy({...base,pageText:"Example Company hiring a Junior HR Assistant. Must have three years professional experience. Full-time in Tel Aviv, Israel."}).verified,false));
+test("rejects additional mandatory language",()=>assert.equal(inspectVacancy({...base,pageText:base.pageText+" Fluent Hebrew required."}).verified,false));
