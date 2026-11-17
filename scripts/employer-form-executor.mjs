@@ -83,9 +83,10 @@ try{
  if(unchecked.length)throw Error("Required selections or consent need review: "+unchecked.slice(0,12).join(", "));
  if(!submit){receipt.status="Prepared";receipt.reason="Form prepared for review; rerun with --submit after inspecting it";}
  if(submit){
- const buttons=page.getByRole("button",{name:/^(submit application|send application|apply now|submit)$/i});
+ const buttons=page.getByRole("button",{name:/^(submit application|send application|submit)$/i});
  if(await buttons.count()!==1)throw Error("Unambiguous submission button not found");
  if(!args.includes("--confirm-authorized"))throw Error("Submission requires --submit --confirm-authorized (explicit permission for this employer application)");
+ receipt.reason="Submission button clicked; awaiting employer confirmation. Do not retry automatically.";
  await buttons.click({timeout:12000});
  await page.waitForLoadState("domcontentloaded",{timeout:15000}).catch(()=>{});
  const after=(await page.locator("body").innerText()).slice(0,25000);
