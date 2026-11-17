@@ -5,3 +5,10 @@
 
 /* Navigation and action link parity */
 .action-link{display:inline-flex;align-items:center;justify-content:center;min-height:43px;padding:11px 18px;border-radius:11px;text-decoration:none;font-size:13px;font-weight:700;white-space:nowrap}.section-head{flex-wrap:wrap}.sidebar nav a{display:block}.action-link:focus-visible{outline:3px solid #8eb7ff;outline-offset:3px}
+
+/* Cloud session UI: do not show the password form while authenticated */
+[hidden]{display:none!important}
+.cloud-remember-label{display:flex!important;align-items:center;gap:10px;line-height:1.5;font-weight:500!important}
+.cloud-remember-label input{width:18px;height:18px;min-height:18px;flex-shrink:0;accent-color:#2563eb}
+.cloud-session-message{margin:18px 0 4px;padding:14px 16px;border:1px solid #cce7d9;border-radius:11px;background:#f3fbf7;color:#226043;font-size:14px}
+#cloud-auth-state{font-size:12px}
