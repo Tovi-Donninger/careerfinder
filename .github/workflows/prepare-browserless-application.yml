@@ -48,6 +48,7 @@ jobs:
             node scripts/select-next-application.mjs
           fi
       - name: Install browser client
+        if: steps.select.outputs.job_id != ''
         run: npm install --no-save --no-package-lock playwright-core@1.56.1
       - name: Prepare one screened employer application (submit only when explicitly enabled)
         if: steps.select.outputs.job_id != ''
