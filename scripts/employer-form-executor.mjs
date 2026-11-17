@@ -63,9 +63,20 @@ try{
  const cvPath=application.cvFile?resolve(application.cvFile):"";
  if(cvPath){const input=page.locator('input[type="file"]').first();if(await input.count())await input.setInputFiles(cvPath)}
  // Never invent answers to screening, work authorization, compensation or consent questions.
- const required=await page.locator('input[required],select[required],textarea[required]').evaluateAll(nodes=>nodes.filter(el=>!el.disabled&&!el.value&&!["hidden","submit","checkbox","radio","file"].includes(el.type)).map(el=>el.name||el.id||"unnamed required field"));
+ const required=await page.locator('input[required],select[required],textarea[required]').evaluateAll(nodes=>nodes.filter(el=>!el.disabled&&!el.value&&!["hidden","submit","checkbox","radio"].includes(el.type)).map(el=>el.name||el.id||"unnamed required field"));
  if(required.length)throw Error("Required questions need review: "+required.slice(0,12).join(", "));
- const unchecked=await page.locator('input[type="checkbox"][required],input[type="radio"][required]').evaluateAll(nodes=>nodes.filter(el=>!el.checked).map(el=>el.name||el.id||"required selection"));
+ // Group required radio buttons by question; one selected option satisfies the group.
+ // Never infer consent, work authorization, sponsorship or demographic answers.
+ const unchecked=await page.locator('input[type="checkbox"][required],input[type="radio"][required]').evaluateAll(nodes=>{
+   const missing=[],radios=new Map();
+   for(const el of nodes){
+     if(el.disabled)continue;
+     if(el.type==="checkbox"&&!el.checked)missing.push(el.name||el.id||"required consent");
+     if(el.type==="radio"){const key=el.name||el.id||"unnamed radio group";const group=radios.get(key)||[];group.push(el);radios.set(key,group)}
+   }
+   for(const [key,group] of radios)if(!group.some(el=>el.checked))missing.push(key);
+   return missing;
+ });
  if(unchecked.length)throw Error("Required selections or consent need review: "+unchecked.slice(0,12).join(", "));
  if(!submit){receipt.status="Prepared";receipt.reason="Form prepared for review; rerun with --submit after inspecting it";}
  if(submit){
