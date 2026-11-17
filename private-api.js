@@ -30,7 +30,7 @@ function validProfile(p) {
   return Object.keys(p).every(k => fields.includes(k) && typeof p[k] === "string" && p[k].length <= 30000);
 }
 const statuses = ["Discovered","Prepared","Submitted","Interview","Rejected","Blocked"];
-export async function personalApi(request, env, url) {
+export async function personalApi(request, env, url, searchHandler) {
   if (!env.DB || !env.ADMIN_PASSWORD_HASH) return response({error:"Secure workspace is not configured. Set the D1 DB binding and ADMIN_PASSWORD_HASH secret."},503);
   const path = url.pathname;
   const method = request.method;
@@ -53,6 +53,13 @@ export async function personalApi(request, env, url) {
   if (path === "/api/private/logout" && method === "POST") {
     await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(await sha256(tokenFrom(request))).run();
     return response({ok:true});
+  }
+  if (path === "/api/private/matched-search" && method === "POST") {
+    const row = await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
+    if (!row) return response({error:"Save your professional profile to the cloud first."},400);
+    let profile; try {profile=JSON.parse(row.profile_json)} catch {return response({error:"Stored profile could not be read."},500)}
+    if (!profile || !String(profile.roles || profile.cv || profile.experience || "").trim()) return response({error:"Add targeted roles, experience or CV to your cloud profile first."},400);
+    return await searchHandler(profile);
   }
   if (path === "/api/private/profile" && method === "GET") {
     const row = await env.DB.prepare("SELECT profile_json,updated_at FROM personal_profile WHERE id=1").first();
