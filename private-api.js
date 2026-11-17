@@ -98,6 +98,12 @@ export async function personalApi(request, env, url, searchHandler) {
   }
   // Application automation is deliberately disabled until an authorized submission
   // adapter is installed. A queued item must never be represented as submitted.
+  if (path === "/api/private/recruitment/submitted-applications" && method === "GET") {
+    // Only application executor records with an external confirmation may appear here.
+    // Manual entries and unsubmitted queue items are intentionally excluded.
+    const rows=await env.DB.prepare("SELECT q.id,q.job_id,q.provider,q.external_reference,q.updated_at AS submitted_at,j.title,j.company,j.location,j.url FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Submitted' AND length(trim(q.external_reference))>0 ORDER BY q.updated_at DESC LIMIT 500").all();
+    return response({applications:rows.results||[],verifiedOnly:true});
+  }
   if (path === "/api/private/recruitment/application-policy" && method === "GET") {
     const policy=await env.DB.prepare("SELECT * FROM recruitment_application_policy WHERE id=1").first();
     return response({policy,submissionAdapterConfigured:false,automaticSubmissionAvailable:false});
