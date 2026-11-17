@@ -1,3 +1,4 @@
+import { freeSearch } from "./free-search.js";
 import { personalApi } from "./private-api.js";
 const cors = {
   "Access-Control-Allow-Origin": "https://tovi-donninger.github.io",
@@ -307,14 +308,14 @@ export default {
         const query = roleFamilies.slice(0, 8).join(", ") || clean(profile.headline, 180) || "Suitable professional roles";
         const location = clean(profile.locations, 120) || [profile.city, profile.country].filter(Boolean).join(", ") || "Israel or remote from Israel";
         const cv = [profile.headline, profile.education, profile.experience, profile.skills, profile.cv].filter(Boolean).join("\n").slice(0, 5000);
-        return search(env, {query, location, roles:roleFamilies.slice(0,8), cv, experience:"associate", workMode:"any"});
+        return freeSearch({query, location, roles:roleFamilies.slice(0,8), cv, experience:"associate", workMode:"any"});
       });
-      if (request.method === "GET" && url.pathname === "/") return json({ status: "online", service: "CareerFinder OpenAI job search", endpoints: ["/api/analyse", "/api/search"] });
+      if (request.method === "GET" && url.pathname === "/") return json({ status: "online", service: "CareerFinder free public-feed job search", endpoints: ["/api/analyse", "/api/search"] });
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
       let body;
       try { body = await request.json(); } catch { return json({ error: "Invalid JSON request." }, 400); }
-      if (url.pathname === "/api/analyse") return await analyse(env, body);
-      if (url.pathname === "/api/search" || url.pathname === "/api/search-v2") return await search(env, body);
+      if (url.pathname === "/api/analyse") return json({error:"Paid AI analysis has been disabled. Free job matching is available."}, 410);
+      if (url.pathname === "/api/search" || url.pathname === "/api/search-v2") return await freeSearch(body);
       return json({ error: "Not found." }, 404);
     } catch (error) {
       return json({ error: "Worker request failed: " + clean(error.message || error, 260) }, 500);
