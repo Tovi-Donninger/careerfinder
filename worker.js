@@ -301,7 +301,14 @@ export default {
       const origin = request.headers.get("Origin") || "";
       if (origin && origin !== "https://tovi-donninger.github.io" && !origin.startsWith("http://localhost:")) return json({ error: "Origin not allowed." }, 403);
       const url = new URL(request.url);
-      if (url.pathname.startsWith("/api/private/")) return await personalApi(request, env, url);
+      if (url.pathname.startsWith("/api/private/")) return await personalApi(request, env, url, async profile => {
+        const roleText = clean(profile.roles, 1200);
+        const roleFamilies = roleText.split(/[,;\n]+/).map(x => clean(x, 80)).filter(Boolean);
+        const query = roleFamilies.slice(0, 8).join(", ") || clean(profile.headline, 180) || "Suitable professional roles";
+        const location = clean(profile.locations, 120) || [profile.city, profile.country].filter(Boolean).join(", ") || "Israel or remote from Israel";
+        const cv = [profile.headline, profile.education, profile.experience, profile.skills, profile.cv].filter(Boolean).join("\n").slice(0, 5000);
+        return search(env, {query, location, roles:roleFamilies.slice(0,8), cv, experience:"associate", workMode:"any"});
+      });
       if (request.method === "GET" && url.pathname === "/") return json({ status: "online", service: "CareerFinder OpenAI job search", endpoints: ["/api/analyse", "/api/search"] });
       if (request.method !== "POST") return json({ error: "Method not allowed." }, 405);
       let body;
