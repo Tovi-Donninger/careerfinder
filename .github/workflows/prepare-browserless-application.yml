@@ -53,9 +53,20 @@ jobs:
           printf '%s' "$CAREERFINDER_CV_BASE64" | base64 --decode > /tmp/careerfinder-cv.pdf
           test -s /tmp/careerfinder-cv.pdf
           node scripts/fetch-application-handoff.mjs "$JOB_ID" /tmp/careerfinder-cv.pdf
+          set +e
           if [[ "$AUTO_SUBMIT" == "true" ]]; then
             node scripts/employer-form-executor.mjs --application "private-application-${JOB_ID//[^a-zA-Z0-9_-]/}.json" --submit --confirm-authorized
           else
             node scripts/employer-form-executor.mjs --application "private-application-${JOB_ID//[^a-zA-Z0-9_-]/}.json"
           fi
-          echo "Browser session ended. Check runner output for actual submission confirmation; never infer submission from workflow success."
+          executor_exit=$?
+          set -e
+          receipt_files=(application-receipts/*.json)
+          if [[ -f "${receipt_files[0]}" ]]; then
+            node scripts/upload-application-receipt.mjs "${receipt_files[0]}" "$JOB_ID"
+          else
+            echo "::error::No browser receipt was created. Manual investigation required."
+            exit 1
+          fi
+          echo "Browser result synchronized. A submitted receipt still requires independent confirmation."
+          exit "$executor_exit"
