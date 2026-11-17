@@ -1,7 +1,7 @@
 name: CareerFinder Browserless application (prepare or verified auto-submit)
 on:
   schedule:
-    - cron: "15 6 * * 1-5"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       job_id:
