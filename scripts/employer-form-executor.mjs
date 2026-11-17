@@ -47,7 +47,7 @@ const browser=token
  : await chromium.launch({headless:!args.includes("--visible")});
 
 const page=await browser.newPage({acceptDownloads:false});
-const receipt={id:randomUUID(),jobUrl:url.href,jobTitle:job.title||"",company:job.company||"",status:"Needs review",submitted:false,at:new Date().toISOString(),confirmation:""};
+const receipt={id:randomUUID(),jobUrl:url.href,jobTitle:job.title||"",company:job.company||"",status:"Needs review",submitted:false,at:new Date().toISOString(),confirmation:"",reason:"Application session started; manual verification may be required"};
 const fill=async(selectors,value)=>{if(!value)return false;for(const selector of selectors){const loc=page.locator(selector).first();if(await loc.count()&&await loc.isVisible()&&await loc.isEnabled()){await loc.fill(String(value));return true}}return false};
 try{
  await page.goto(url.href,{waitUntil:"domcontentloaded",timeout:45000});
@@ -77,7 +77,7 @@ try{
  const after=(await page.locator("body").innerText()).slice(0,25000);
  const match=after.match(/(?:thank you for applying|application (?:has been |was )?submitted|application received|we (?:have )?received your application|successfully applied)/i);
  if(!match)throw Error("Submission clicked but no employer confirmation found; do not retry until checked for duplicates");
- receipt.submitted=true;receipt.status="Submitted";receipt.confirmation=match[0];receipt.confirmationPage=page.url();
+ receipt.submitted=true;receipt.status="Submitted";receipt.reason="Employer confirmation captured; independent verification pending";receipt.confirmation=match[0];receipt.confirmationPage=page.url();
  }
 } catch(error){receipt.reason=error.message; if(receipt.status!=="Prepared")receipt.status="Needs review"}
 finally{
