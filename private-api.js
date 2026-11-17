@@ -1,3 +1,4 @@
+import { routeApplication } from "./application-channels.js";
 import { assessApplication, executeApplication } from "./application-executor.js";
 import { zeroExperienceEvidence } from "./zero-experience.js";
 // Personal workspace API. Mount only after configuring D1 and ADMIN_PASSWORD_HASH.
@@ -117,7 +118,7 @@ export async function personalApi(request, env, url, searchHandler) {
     await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Blocked',?) ON CONFLICT(job_id) DO UPDATE SET status=CASE WHEN recruitment_application_queue.status='Submitted' THEN 'Submitted' ELSE 'Blocked' END,reason=CASE WHEN recruitment_application_queue.status='Submitted' THEN recruitment_application_queue.reason ELSE excluded.reason END,updated_at=CURRENT_TIMESTAMP").bind(id,job.id,executor.reason).run();
     const record=await env.DB.prepare("SELECT * FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Submission blocked',?)").bind(crypto.randomUUID(),record.id,executor.reason).run();
-    return response({submitted:false,status:"Blocked",reasons:assessment.reasons,reason:executor.reason,adapterConfigured:false});
+    return response({submitted:false,status:"Blocked",channel:routeApplication(job.url),reasons:assessment.reasons,reason:executor.reason,adapterConfigured:false});
   }
   if (path === "/api/private/recruitment/submitted-applications" && method === "GET") {
     // Only application executor records with an external confirmation may appear here.
@@ -138,7 +139,7 @@ export async function personalApi(request, env, url, searchHandler) {
   }
   if (path === "/api/private/recruitment/application-queue" && method === "GET") {
     const rows=await env.DB.prepare("SELECT q.*,j.title,j.company,j.url,j.match_score FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id ORDER BY q.created_at DESC LIMIT 500").all();
-    return response({items:rows.results||[],automaticSubmissionAvailable:false});
+    return response({items:(rows.results||[]).map(j=>({...j,channel:routeApplication(j.url)})),automaticSubmissionAvailable:false});
   }
   if (path === "/api/private/recruitment/application-queue" && method === "POST") {
     let body;try{body=await request.json()}catch{return response({error:"Invalid JSON"},400)}
@@ -152,12 +153,13 @@ export async function personalApi(request, env, url, searchHandler) {
     if(!/confirmed open|accepting applications/i.test(job.verification_status||""))reasons.push("Open application status not confirmed");
     if(!/english/i.test(job.language_evidence||"")||/not confirmed|verify|unclear/i.test(job.language_evidence||""))reasons.push("English-only eligibility not confirmed");
     if(!job.eligibility_evidence||/not confirmed|verify|unclear|potential gap/i.test(job.eligibility_evidence))reasons.push("Eligibility needs review");
-    const reason=reasons.length?reasons.join("; "):"Meets preliminary screening; permitted submission integration still required";
+    const channel=routeApplication(job.url);
+    const reason=reasons.length?reasons.join("; "):"Meets preliminary screening; "+channel.reason;
     const id=crypto.randomUUID();
     await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Needs review',?) ON CONFLICT(job_id) DO NOTHING").bind(id,job.id,reason).run();
     const record=await env.DB.prepare("SELECT * FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     if(record.id===id)await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Queued',?)").bind(crypto.randomUUID(),id,reason).run();
-    return response({ok:true,item:record,submitted:false,automaticSubmissionAvailable:false});
+    return response({ok:true,item:record,channel,submitted:false,automaticSubmissionAvailable:false});
   }
   if (path === "/api/private/applications" && method === "GET") {
     const rows = await env.DB.prepare("SELECT * FROM applications ORDER BY updated_at DESC LIMIT 1000").all();
