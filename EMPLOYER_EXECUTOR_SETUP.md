@@ -94,3 +94,12 @@ node scripts/employer-form-executor.mjs --application private-application.json
 ```
 
 Do not add `--submit` for the initial connection test. The provider account and API token must be created by the account owner. No token has been configured or browser session verified in production.
+
+
+## GitHub Actions: manual hosted preparation (no submission)
+
+Workflow: `.github/workflows/prepare-browserless-application.yml`. Trigger it manually with a screened private CareerFinder job ID. It retrieves the private handoff, connects to Browserless, fills supported fields, and **never passes submission flags**. It deletes the CV, private handoff and local screenshots at the end and does not upload artifacts or receipts. Check the workflow outcome only; no employer application is submitted.
+
+In addition to `BROWSERLESS_TOKEN`, the workflow requires repository Actions secrets `CAREERFINDER_SESSION_TOKEN` (a temporary signed-in CareerFinder session token, expires after about 12 hours) and `CAREERFINDER_CV_BASE64` (base64-encoded CV PDF). Base64 is encoding, **not encryption**. The CV secret is sensitive personal information; use only a private repository with restricted Actions access, do not paste its value into issues, chats, workflow inputs or logs, and remove it after testing if no longer needed. If you prefer not to store a CV in GitHub secrets, run the executor on your own trusted machine instead.
+
+**Important budget caveat:** GitHub-hosted runners are ephemeral. The executor's `.careerfinder-private` unit ledger is deleted after each run, so its 900-unit limit is **not a persistent monthly cap across workflow runs**. The workflow's manual trigger and one-job-per-run design are temporary controls only. Set an actual spending cap in Browserless and implement shared persistent D1-based reservation/account usage monitoring before enabling recurring automation. Browserless's actual unit charging may differ from reserved estimates. The workflow has not been executed or independently verified.
