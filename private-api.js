@@ -127,6 +127,7 @@ export async function personalApi(request, env, url, searchHandler) {
     if(channel.channel==="linkedin"||channel.channel==="indeed")return response({error:"Exact employer application URL must be verified first",channel},409);
     const existing=await env.DB.prepare("SELECT status FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     if(existing?.status==="Submitted")return response({error:"Already submitted; duplicate blocked"},409);
+    await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Needs review',?) ON CONFLICT(job_id) DO NOTHING").bind(crypto.randomUUID(),job.id,"Application handoff started; awaiting browser outcome").run();
     return response({jobId:job.id,job:{url:job.url,title:job.title,company:job.company},profile,verifiedZeroExperience:true,verifiedEnglish:true,verifiedIsraelEligibility:true,confirmedOpen:true,sourceEvidence:{zeroExperience:evidence.evidence,sourceUrl:evidence.source_url,language:job.language_evidence,eligibility:job.eligibility_evidence,open:job.verification_status},note:"Private, authenticated handoff. Browser executor must independently check the employer page. No submission occurred."});
   }
   if (path === "/api/private/recruitment/application-executor/receipt" && method === "POST") {
