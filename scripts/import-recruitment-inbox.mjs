@@ -1,11 +1,11 @@
 // Convert reviewed public vacancy records to safely quoted D1 SQL.
 // No personal profile, passwords or application materials belong in the feed.
 import { readFileSync, writeFileSync } from "node:fs";
-import { readdirSync } from "node:fs";
+import { readdirSync, existsSync } from "node:fs";
 const quote = v => "'" + String(v ?? "").replaceAll("'", "''") + "'";
 const clean = (v,n) => typeof v === "string" ? v.trim().slice(0,n) : "";
 const dir="recruitment-inbox";
-const files=readdirSync(dir).filter(f=>/^jobs-[0-9]{4}-[0-9]{2}-[0-9]{2}(?:-[a-z0-9-]+)?\.json$/.test(f)).sort();
+const files=(existsSync(dir)?readdirSync(dir):[]).filter(f=>/^jobs-[0-9]{4}-[0-9]{2}-[0-9]{2}(?:-[a-z0-9-]+)?\.json$/.test(f)).sort();
 const statements=[];
 let total=0;
 for(const file of files){
