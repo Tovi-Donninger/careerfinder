@@ -96,6 +96,40 @@ export async function personalApi(request, env, url, searchHandler) {
     await env.DB.batch(statements);
     return response({ok:true,received:records.length});
   }
+  // Application automation is deliberately disabled until an authorized submission
+  // adapter is installed. A queued item must never be represented as submitted.
+  if (path === "/api/private/recruitment/application-policy" && method === "GET") {
+    const policy=await env.DB.prepare("SELECT * FROM recruitment_application_policy WHERE id=1").first();
+    return response({policy,submissionAdapterConfigured:false,automaticSubmissionAvailable:false});
+  }
+  if (path === "/api/private/recruitment/application-policy" && method === "PUT") {
+    let body;try{body=await request.json()}catch{return response({error:"Invalid JSON"},400)}
+    if(!body||typeof body!=="object"||body.enabled!==false||!Number.isInteger(body.minMatchScore)||body.minMatchScore<70||body.minMatchScore>100||!Number.isInteger(body.maxDailySubmissions)||body.maxDailySubmissions<1||body.maxDailySubmissions>10)
+      return response({error:"Automatic submissions cannot be enabled until a permitted, authenticated application adapter is configured. Set enabled=false."},400);
+    await env.DB.prepare("UPDATE recruitment_application_policy SET enabled=0,min_match_score=?,max_daily_submissions=?,updated_at=CURRENT_TIMESTAMP WHERE id=1").bind(body.minMatchScore,body.maxDailySubmissions).run();
+    return response({ok:true,enabled:false,submissionAdapterConfigured:false});
+  }
+  if (path === "/api/private/recruitment/application-queue" && method === "GET") {
+    const rows=await env.DB.prepare("SELECT q.*,j.title,j.company,j.url,j.match_score FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id ORDER BY q.created_at DESC LIMIT 500").all();
+    return response({items:rows.results||[],automaticSubmissionAvailable:false});
+  }
+  if (path === "/api/private/recruitment/application-queue" && method === "POST") {
+    let body;try{body=await request.json()}catch{return response({error:"Invalid JSON"},400)}
+    if(typeof body?.jobId!=="string")return response({error:"jobId required"},400);
+    const job=await env.DB.prepare("SELECT * FROM recruitment_jobs WHERE id=?").bind(body.jobId).first();
+    if(!job)return response({error:"Job not found"},404);
+    const reasons=[];
+    if(!Number.isInteger(job.match_score)||job.match_score<85)reasons.push("Match score below 85 or missing");
+    if(!/confirmed open|accepting applications/i.test(job.verification_status||""))reasons.push("Open application status not confirmed");
+    if(!/english/i.test(job.language_evidence||"")||/not confirmed|verify|unclear/i.test(job.language_evidence||""))reasons.push("English-only eligibility not confirmed");
+    if(!job.eligibility_evidence||/not confirmed|verify|unclear|potential gap/i.test(job.eligibility_evidence))reasons.push("Eligibility needs review");
+    const reason=reasons.length?reasons.join("; "):"Meets preliminary screening; permitted submission integration still required";
+    const id=crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Needs review',?) ON CONFLICT(job_id) DO NOTHING").bind(id,job.id,reason).run();
+    const record=await env.DB.prepare("SELECT * FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
+    if(record.id===id)await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Queued',?)").bind(crypto.randomUUID(),id,reason).run();
+    return response({ok:true,item:record,submitted:false,automaticSubmissionAvailable:false});
+  }
   if (path === "/api/private/applications" && method === "GET") {
     const rows = await env.DB.prepare("SELECT * FROM applications ORDER BY updated_at DESC LIMIT 1000").all();
     return response({applications:rows.results || []});
