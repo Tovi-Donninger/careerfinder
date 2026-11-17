@@ -1,3 +1,4 @@
+import { zeroExperienceEvidence } from "./zero-experience.js";
 // Personal workspace API. Mount only after configuring D1 and ADMIN_PASSWORD_HASH.
 // Password hash format: PBKDF2 SHA-256 with 100000 iterations, base64 salt and digest.
 const AUTH_ORIGIN = "https://tovi-donninger.github.io";
@@ -74,7 +75,7 @@ export async function personalApi(request, env, url, searchHandler) {
     return response({ok:true});
   }
   if (path === "/api/private/recruitment/jobs" && method === "GET") {
-    const rows=await env.DB.prepare("SELECT * FROM recruitment_jobs ORDER BY discovered_at DESC LIMIT 500").all();
+    const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url ORDER BY j.discovered_at DESC LIMIT 500").all();
     return response({jobs:rows.results||[]});
   }
   if (path === "/api/private/recruitment/jobs" && method === "POST") {
@@ -90,10 +91,11 @@ export async function personalApi(request, env, url, searchHandler) {
       let url;try{url=new URL(job.url);if(url.protocol!=="https:")throw Error("https required");url.hash="";for(const key of [...url.searchParams.keys()])if(/^(utm_|fbclid$|gclid$)/i.test(key))url.searchParams.delete(key)}catch{return response({error:"Each job needs a valid HTTPS vacancy URL"},400)}
       const title=clean(job.title,250),company=clean(job.company,250);
       if(!title||!company)return response({error:"Each job needs a title and company"},400);
-      records.push({id:crypto.randomUUID(),url:url.toString(),title,company,location:clean(job.location,250),work:clean(job.workArrangement,80),type:clean(job.employmentType,80),salary:clean(job.salary,120),score:Number.isInteger(job.matchScore)&&job.matchScore>=0&&job.matchScore<=100?job.matchScore:null,reason:clean(job.matchReason,2500),language:clean(job.languageEvidence,1500),eligibility:clean(job.eligibilityEvidence,1500),verification:clean(job.verificationStatus,80)||"Unverified",source:clean(job.source,150)});
+      if(!zeroExperienceEvidence(job))return response({error:"Every job must include explicit no-experience-required evidence and its HTTPS source URL"},400);
+      records.push({zeroEvidence:clean(job.zeroExperienceEvidence,1500),zeroSource:clean(job.zeroExperienceSourceUrl,1000),id:crypto.randomUUID(),url:url.toString(),title,company,location:clean(job.location,250),work:clean(job.workArrangement,80),type:clean(job.employmentType,80),salary:clean(job.salary,120),score:Number.isInteger(job.matchScore)&&job.matchScore>=0&&job.matchScore<=100?job.matchScore:null,reason:clean(job.matchReason,2500),language:clean(job.languageEvidence,1500),eligibility:clean(job.eligibilityEvidence,1500),verification:clean(job.verificationStatus,80)||"Unverified",source:clean(job.source,150)});
     }
     const statements=records.map(j=>env.DB.prepare(`INSERT INTO recruitment_jobs(id,url,title,company,location,work_arrangement,employment_type,salary,match_score,match_reason,language_evidence,eligibility_evidence,verification_status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET title=excluded.title,company=excluded.company,location=excluded.location,work_arrangement=excluded.work_arrangement,employment_type=excluded.employment_type,salary=excluded.salary,match_score=excluded.match_score,match_reason=excluded.match_reason,language_evidence=excluded.language_evidence,eligibility_evidence=excluded.eligibility_evidence,verification_status=excluded.verification_status,source=excluded.source,last_seen_at=CURRENT_TIMESTAMP`).bind(j.id,j.url,j.title,j.company,j.location,j.work,j.type,j.salary,j.score,j.reason,j.language,j.eligibility,j.verification,j.source));
-    await env.DB.batch(statements);
+    await env.DB.batch([...statements,...records.map(j=>env.DB.prepare("INSERT INTO recruitment_zero_experience_evidence(job_url,evidence,source_url) VALUES(?,?,?) ON CONFLICT(job_url) DO UPDATE SET evidence=excluded.evidence,source_url=excluded.source_url,verified_at=CURRENT_TIMESTAMP").bind(j.url,j.zeroEvidence,j.zeroSource))]);
     return response({ok:true,received:records.length});
   }
   // Application automation is deliberately disabled until an authorized submission
@@ -124,7 +126,9 @@ export async function personalApi(request, env, url, searchHandler) {
     if(typeof body?.jobId!=="string")return response({error:"jobId required"},400);
     const job=await env.DB.prepare("SELECT * FROM recruitment_jobs WHERE id=?").bind(body.jobId).first();
     if(!job)return response({error:"Job not found"},404);
+    const evidence=await env.DB.prepare("SELECT evidence AS zeroExperienceEvidence,source_url AS zeroExperienceSourceUrl FROM recruitment_zero_experience_evidence WHERE job_url=?").bind(job.url).first();
     const reasons=[];
+    if(!zeroExperienceEvidence(evidence||{}))reasons.push("No verified zero-experience requirement");
     if(!Number.isInteger(job.match_score)||job.match_score<85)reasons.push("Match score below 85 or missing");
     if(!/confirmed open|accepting applications/i.test(job.verification_status||""))reasons.push("Open application status not confirmed");
     if(!/english/i.test(job.language_evidence||"")||/not confirmed|verify|unclear/i.test(job.language_evidence||""))reasons.push("English-only eligibility not confirmed");
