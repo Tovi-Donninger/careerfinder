@@ -7,8 +7,8 @@ The workflow is in `.github/workflows/deploy-cloudflare.yml` on the `feature/sec
 1. Cloudflare Dashboard → My Profile → API Tokens → Create Token. Use a narrowly scoped token with **Workers Scripts: Edit** and **D1: Edit** for the relevant account. Some Cloudflare deployments may also need Workers Routes: Edit if routes are configured.
 2. Copy your Cloudflare **Account ID** from the Cloudflare dashboard.
 3. GitHub → `Tovi-Donninger/careerfinder` → Settings → Secrets and variables → Actions → New repository secret. Create `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` separately. Do not commit either value.
-4. Cloudflare → Workers & Pages → `careerfinder-search` → Settings → Variables and Secrets. Create **encrypted** `ADMIN_PASSWORD_HASH` using the PBKDF2 instructions in `SECURE_SETUP.md`. This is required for private login. The workflow does not create this secret.
-5. After review, merge `feature/secure-profile-d1` into `main`. Watch GitHub → Actions → Deploy CareerFinder Cloudflare Worker. The workflow applies the SQL migration then deploys the Worker.
+4. GitHub → repository Settings → Secrets and variables → Actions: create a repository secret named `CAREERFINDER_LOGIN_PASSWORD` containing a unique strong password of at least 16 characters. The workflow hashes it using PBKDF2 with a fresh random salt and uploads only the hash to Cloudflare as `ADMIN_PASSWORD_HASH`. Never place the password in code, documentation or chat.
+5. After review, merge `feature/secure-profile-d1` into `main`. Watch GitHub → Actions → Deploy CareerFinder Cloudflare Worker. The workflow applies the SQL migration, provisions the login hash and deploys the Worker.
 6. Verify the Worker is healthy and private login works before putting any personal information into the website.
 
 ## Important safeguards
