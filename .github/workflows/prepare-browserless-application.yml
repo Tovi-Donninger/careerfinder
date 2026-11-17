@@ -1,10 +1,12 @@
 name: CareerFinder Browserless application (prepare or verified auto-submit)
 on:
+  schedule:
+    - cron: "15 6 * * 1-5"
   workflow_dispatch:
     inputs:
       job_id:
-        description: 'Exact CareerFinder private job ID'
-        required: true
+        description: 'Exact CareerFinder private job ID; leave blank to select next screened employer vacancy'
+        required: false
         type: string
       auto_submit:
         description: 'Submit only if all verification checks and employer form requirements pass; otherwise stop for review'
@@ -34,15 +36,27 @@ jobs:
           test -n "$BROWSERLESS_TOKEN" || { echo "::error::Missing BROWSERLESS_TOKEN"; exit 1; }
           test -n "$CAREERFINDER_AUTOMATION_KEY" || { echo "::error::Missing CAREERFINDER_AUTOMATION_KEY"; exit 1; }
           test -n "$CAREERFINDER_CV_BASE64" || { echo "::error::Missing CAREERFINDER_CV_BASE64"; exit 1; }
+      - name: Select next employer vacancy when no job ID was supplied
+        id: select
+        env:
+          CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
+          INPUT_JOB_ID: ${{ inputs.job_id }}
+        run: |
+          if [[ -n "$INPUT_JOB_ID" ]]; then
+            echo "job_id=$INPUT_JOB_ID" >> "$GITHUB_OUTPUT"
+          else
+            node scripts/select-next-application.mjs
+          fi
       - name: Install browser client
         run: npm install --no-save --no-package-lock playwright-core@1.56.1
-      - name: Prepare one screened job (NEVER SUBMIT)
+      - name: Prepare one screened employer application (submit only when explicitly enabled)
+        if: steps.select.outputs.job_id != ''
         env:
           BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
           CAREERFINDER_CV_BASE64: ${{ secrets.CAREERFINDER_CV_BASE64 }}
-          JOB_ID: ${{ inputs.job_id }}
-          AUTO_SUBMIT: ${{ inputs.auto_submit }}
+          JOB_ID: ${{ steps.select.outputs.job_id }}
+          AUTO_SUBMIT: ${{ inputs.auto_submit == true && vars.CAREERFINDER_ENABLE_AUTO_SUBMIT == 'true' }}
           CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP: '900'
           CAREERFINDER_BROWSER_RESERVE_UNITS: '4'
         shell: bash
