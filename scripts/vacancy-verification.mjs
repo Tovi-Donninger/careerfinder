@@ -13,7 +13,7 @@ export function inspectVacancy({pageText,title,company,sourceEvidence={}}){
   if(!/(?:no (?:prior |previous |professional )?experience (?:required|necessary|needed)|(?:entry.level|junior).{0,80}(?:no experience|training provided)|(?:experience (?:is )?not required))/i.test(text))failures.push("Employer page does not explicitly confirm no prior experience is required");
   if(/(?:fluent|proficient|native|mandatory|required|must speak).{0,50}(?:hebrew|arabic|russian|french|german|spanish)|(?:hebrew|arabic|russian|french|german|spanish).{0,50}(?:required|mandatory|fluent|proficient)/i.test(text))failures.push("Possible additional language requirement");
   if(/(?:must be based in|residents only|only candidates (?:from|in)).{0,50}(?:usa|united states|uk|united kingdom|europe|eu|canada)/i.test(text))failures.push("Possible location restriction");
-  if(!sourceEvidence?.language||/not confirmed|unclear|verify/i.test(sourceEvidence.language))failures.push("English-language eligibility has not been independently verified");
-  if(!sourceEvidence?.eligibility||/not confirmed|unclear|verify/i.test(sourceEvidence.eligibility))failures.push("Israel work eligibility has not been independently verified");
+  if(!sourceEvidence?.language||!/\benglish\b/i.test(sourceEvidence.language)||/not confirmed|unclear|verify/i.test(sourceEvidence.language))failures.push("English-language eligibility has not been independently verified");
+  if(!sourceEvidence?.eligibility||!/\bisrael\b/i.test(sourceEvidence.eligibility)||/not confirmed|unclear|verify/i.test(sourceEvidence.eligibility))failures.push("Israel work eligibility has not been independently verified");
   return {verified:failures.length===0,failures};
 }
