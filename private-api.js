@@ -247,7 +247,15 @@ export async function personalApi(request, env, url, searchHandler) {
   }
   if (path === "/api/private/recruitment/application-queue" && method === "GET") {
     const rows=await env.DB.prepare("SELECT q.*,j.title,j.company,j.url,j.match_score FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id ORDER BY q.created_at DESC LIMIT 500").all();
-    return response({items:(rows.results||[]).map(j=>({...j,channel:routeApplication(j.url)})),automaticSubmissionAvailable:false});
+    const items=(rows.results||[]).map(j=>{
+      const reason=String(j.reason||"");
+      const url=String(j.url||"");
+      const locationMatch=reason.match(/(?:location|remote-from-Israel)/i);
+      const unsuitable=/\\b(lead technical recruiter|senior|director|head of|principal|staff engineer)\\b/i.test(j.title||"")||/\\b(berlin|london|france|germany|united kingdom)\\b/i.test(url);
+      const priority=unsuitable?"Low — likely unsuitable":locationMatch?"Check Israel eligibility":"Check experience requirements";
+      return {...j,channel:routeApplication(j.url),reviewPriority:priority,likelyUnsuitable:unsuitable};
+    });
+    return response({items,automaticSubmissionAvailable:false});
   }
   if (path === "/api/private/recruitment/application-queue" && method === "POST") {
     let body;try{body=await request.json()}catch{return response({error:"Invalid JSON"},400)}
