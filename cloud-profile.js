@@ -2,6 +2,7 @@
 (()=>{
   const API="https://careerfinder-search.tovidonninger.workers.dev";
   const KEY="careerfinder.cloud.session.v2";
+  const OLD_KEY="careerfinder.cloud.session.v1";
   const $=id=>document.getElementById(id);
   let token="",expiresAt=0,remember=false;
   function clearStored(){for(const s of [sessionStorage,localStorage]){try{s.removeItem(KEY)}catch{}}}
@@ -15,6 +16,16 @@
         store.removeItem(KEY);
       }catch{try{store.removeItem(KEY)}catch{}}
     }
+  }
+  function migrateLegacy(){
+    if(token)return;
+    try{
+      const old=JSON.parse(sessionStorage.getItem(OLD_KEY)||"null");
+      if(old&&/^[a-f0-9]{64}$/.test(old.token||"")&&Number(old.expiresAt)>Date.now()){
+        token=old.token;expiresAt=Number(old.expiresAt);remember=false;save();
+      }
+      sessionStorage.removeItem(OLD_KEY);
+    }catch{}
   }
   function save(){
     clearStored();
@@ -56,12 +67,13 @@
   $("cloud-login").addEventListener("submit",async event=>{
     event.preventDefault();
     const input=$("cloud-password");
+    const requestedRemember=$("cloud-remember").checked;
     render("Signing in…");
     try{
       const result=await call("/api/private/login","POST",{password:input.value});
       if(!/^[a-f0-9]{64}$/.test(result.token||""))throw Error("Unexpected session response");
       token=result.token;expiresAt=Date.now()+Math.min(Number(result.expiresInSeconds)||43200,43200)*1000;
-      remember=$("cloud-remember").checked;
+      remember=requestedRemember;
       save();
       render(remember?"Signed in. This browser will remember you for up to 12 hours.":"Signed in. This tab will remember you for up to 12 hours.");
       refresh();
@@ -90,6 +102,7 @@
     signedOut("Signed out. Saved login cleared from this browser.");
   });
   restore();
+  migrateLegacy();
   render(token?"Signed in. Your saved session was restored.":"Sign in to access your private profile.");
   if(token)refresh();
 })();
