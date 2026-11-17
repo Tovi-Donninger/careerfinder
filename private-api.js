@@ -54,7 +54,7 @@ export async function personalApi(request, env, url, searchHandler) {
   }
   // Dedicated machine credential: read-only access to screened job handoffs.
   // Never authorize profile edits, queue mutations, or application submission with this key.
-  const machinePaths=new Set(["/api/private/recruitment/application-executor/handoff","/api/private/recruitment/application-executor/receipt","/api/private/recruitment/application-executor/next","/api/private/recruitment/discover"]);
+  const machinePaths=new Set(["/api/private/recruitment/application-executor/handoff","/api/private/recruitment/application-executor/receipt","/api/private/recruitment/application-executor/next","/api/private/recruitment/discover","/api/private/recruitment/verify-queue"]);
   let machineAuthorized=false;
   if(machinePaths.has(path)&&method==="POST"&&env.CAREERFINDER_AUTOMATION_KEY){
     const supplied=request.headers.get("X-CareerFinder-Automation-Key")||"";
@@ -154,6 +154,45 @@ export async function personalApi(request, env, url, searchHandler) {
     const statements=records.map(j=>env.DB.prepare(`INSERT INTO recruitment_jobs(id,url,title,company,location,work_arrangement,employment_type,salary,match_score,match_reason,language_evidence,eligibility_evidence,verification_status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET title=excluded.title,company=excluded.company,location=excluded.location,work_arrangement=excluded.work_arrangement,employment_type=excluded.employment_type,salary=excluded.salary,match_score=excluded.match_score,match_reason=excluded.match_reason,language_evidence=excluded.language_evidence,eligibility_evidence=excluded.eligibility_evidence,verification_status=excluded.verification_status,source=excluded.source,last_seen_at=CURRENT_TIMESTAMP`).bind(j.id,j.url,j.title,j.company,j.location,j.work,j.type,j.salary,j.score,j.reason,j.language,j.eligibility,j.verification,j.source));
     await env.DB.batch([...statements,...records.map(j=>env.DB.prepare("INSERT INTO recruitment_zero_experience_evidence(job_url,evidence,source_url) VALUES(?,?,?) ON CONFLICT(job_url) DO UPDATE SET evidence=excluded.evidence,source_url=excluded.source_url,verified_at=CURRENT_TIMESTAMP").bind(j.url,j.zeroEvidence,j.zeroSource))]);
     return response({ok:true,received:records.length});
+  }
+  if (path === "/api/private/recruitment/verify-queue" && method === "POST") {
+    // Evidence-gathering only. No inferred eligibility, no automatic approval.
+    // Fetch only public HTTPS ATS listings on explicitly allowed hosts.
+    const rows=await env.DB.prepare("SELECT q.id AS queue_id,j.id AS job_id,j.url,j.title,j.company,j.location,q.status FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Needs review' ORDER BY q.updated_at DESC LIMIT 20").all();
+    const results=[];
+    for(const job of rows.results||[]){
+      let host;
+      try{const u=new URL(job.url);if(u.protocol!=="https:"||u.username||u.password||u.port)throw Error("Not a public HTTPS URL");host=u.hostname.toLowerCase()}catch{results.push({jobId:job.job_id,result:"Skipped: invalid URL"});continue}
+      if(!/^(?:boards\\.greenhouse\\.io|job-boards\\.greenhouse\\.io|jobs\\.lever\\.co|jobs\\.ashbyhq\\.com)$/.test(host)){results.push({jobId:job.job_id,result:"Needs review: unsupported employer host"});continue}
+      try{
+        const controller=new AbortController();
+        const timeout=setTimeout(()=>controller.abort(),8000);
+        let res;
+        try{res=await fetch(job.url,{redirect:"manual",headers:{Accept:"text/html"},signal:controller.signal})}finally{clearTimeout(timeout)}
+        if(!res.ok){results.push({jobId:job.job_id,result:"Needs review: employer page HTTP "+res.status});continue}
+        const type=res.headers.get("content-type")||"";
+        if(!type.includes("text/html")){results.push({jobId:job.job_id,result:"Needs review: unexpected page format"});continue}
+        const html=(await res.text()).slice(0,180000);
+        const plain=html.replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi," ").replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi," ").replace(/<[^>]*>/g," ").replace(/&(?:nbsp|amp|quot|#39);/g," ").replace(/\\s+/g," ").slice(0,40000);
+        const titleWords=String(job.title||"").toLowerCase().split(/\\W+/).filter(w=>w.length>3);
+        const titleMatch=titleWords.length>0&&titleWords.filter(w=>plain.toLowerCase().includes(w)).length>=Math.min(2,titleWords.length);
+        const closed=/no longer accepting applications|position has been filled|job is closed|applications are closed|job posting has expired/i.test(plain);
+        const zeroExperience=/(?:no (?:prior |previous |professional )?experience (?:required|necessary|needed)|experience (?:is )?not required)/i.test(plain);
+        const locationExplicit=/\\b(israel|tel aviv|herzliya|raanana|ramat gan|petah tikva|jerusalem|haifa|beer sheva)\\b/i.test(plain);
+        const globalExplicit=/\\b(remote worldwide|work from anywhere|remote from anywhere|worldwide applicants|globally remote)\\b/i.test(plain);
+        const languageExplicit=/\\benglish (?:required|mandatory|fluent)|fluent (?:in )?english|english-speaking\\b/i.test(plain);
+        const languageConflict=/\\b(hebrew|german|french|spanish|arabic|russian)\\b.{0,35}\\b(required|mandatory|fluent|native)\\b/i.test(plain);
+        const restrictions=/\\b(us only|usa only|united states only|uk only|eu only|europe only|must be based in (?:the )?(?:us|usa|uk|eu|europe))\\b/i.test(plain);
+        const checks={employerPageFetched:true,titleMatch,closed,zeroExperience,locationExplicit,globalExplicit,languageExplicit,languageConflict,restrictions};
+        const blockers=[!titleMatch?"Title not confirmed":null,closed?"Vacancy closed":null,!zeroExperience?"No explicit zero-experience statement":null,!(locationExplicit||globalExplicit)||restrictions?"Israel eligibility unconfirmed":null,!languageExplicit||languageConflict?"English-only eligibility unconfirmed":null].filter(Boolean);
+        // Record audit information in the existing review reason, preserving the queue.
+        // Even a zero-blocker result remains unverified until independent checks.
+        const note="Employer-page precheck ("+new Date().toISOString().slice(0,10)+"): "+(blockers.length?blockers.join("; "):"Textual checks found; independent verification required")+". No automatic submission authorized.";
+        await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='Needs review'").bind(note.slice(0,1500),job.queue_id).run();
+        results.push({jobId:job.job_id,title:job.title,result:blockers.length?"Needs review":"Precheck passed — independent review required",checks,blockers});
+      }catch(e){results.push({jobId:job.job_id,result:"Needs review: fetch failed",error:String(e.message||e).slice(0,120)})}
+    }
+    return response({ok:true,checked:results.length,results,automaticApproval:false,automaticSubmission:false});
   }
   if (path === "/api/private/recruitment/application-executor/next" && method === "POST") {
     // Machine-readable candidate discovery only; no applications are submitted here.
