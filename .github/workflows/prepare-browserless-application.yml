@@ -36,6 +36,11 @@ jobs:
           test -n "$BROWSERLESS_TOKEN" || { echo "::error::Missing BROWSERLESS_TOKEN"; exit 1; }
           test -n "$CAREERFINDER_AUTOMATION_KEY" || { echo "::error::Missing CAREERFINDER_AUTOMATION_KEY"; exit 1; }
           test -n "$CAREERFINDER_CV_BASE64" || { echo "::error::Missing CAREERFINDER_CV_BASE64"; exit 1; }
+      - name: Discover new vacancies from public feeds
+        if: inputs.job_id == ''
+        env:
+          CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
+        run: node scripts/discover-vacancies.mjs
       - name: Select next employer vacancy when no job ID was supplied
         id: select
         env:
