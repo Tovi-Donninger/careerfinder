@@ -20,11 +20,11 @@ function remoteok(data){return (Array.isArray(data)?data:[]).filter(x=>x&&x.posi
 export async function freeSearch(body){const responses=await Promise.allSettled([source("https://remotive.com/api/remote-jobs?limit=100"),source("https://www.arbeitnow.com/api/job-board-api"),source("https://remoteok.com/api")]);const jobs=[],errors=[];for(let i=0;i<responses.length;i++){const r=responses[i];if(r.status==="fulfilled")jobs.push(...(i===0?remotive(r.value):i===1?arbeitnow(r.value):remoteok(r.value)));else errors.push((i===0?"Remotive":i===1?"Arbeitnow":"RemoteOK")+": "+tidy(r.reason?.message,100))}
 const terms=roleTerms(body);const seen=new Set();const diagnostics={received:jobs.length,invalid:0,locationOrLanguage:0,noExperienceEvidence:0,duplicate:0,roleMismatch:0};
 const reviewCandidates=[],matched=[];
-const junior=/\\b(junior|entry.level|graduate|trainee|assistant|associate|coordinator|representative|administrator|specialist|support|sdr|bdr|recruiter)\\b/i;
-const senior=/\\b(senior|staff|principal|director|vice president|vp|head of|chief|lead engineer|manager)\\b/i;
-const explicitExperience=/\\b(?:[3-9]|1[0-9])\\+?\\s*(?:years|yrs)\\s*(?:of\\s*)?(?:relevant\\s*|professional\\s*)?experience\\b/i;
+const junior=/\b(junior|entry.level|graduate|trainee|assistant|associate|coordinator|representative|administrator|specialist|support|sdr|bdr|recruiter)\b/i;
+const senior=/\b(senior|staff|principal|director|vice president|vp|head of|chief|lead engineer|manager)\b/i;
+const explicitExperience=/\b(?:[3-9]|1[0-9])\+?\s*(?:years|yrs)\s*(?:of\s*)?(?:relevant\s*|professional\s*)?experience\b/i;
 for(const j of jobs){
- if(!j.title||!j.company||!/^https:\\/\\//i.test(j.url||"")){diagnostics.invalid++;continue}
+ if(!j.title||!j.company||!/^https:\/\//i.test(j.url||"")){diagnostics.invalid++;continue}
  const key=j.url.split("?")[0].toLowerCase();if(seen.has(key)){diagnostics.duplicate++;continue}seen.add(key);
  const s=score(j,body),title=j.title.toLowerCase();
  const relevant=terms.length?terms.some(t=>title.includes(t)):TARGET.some(t=>title.includes(t));
@@ -33,7 +33,7 @@ for(const j of jobs){
  if(!locationOK)diagnostics.locationOrLanguage++;
  const hasEvidence=Boolean(zeroExperienceEvidence({zeroExperienceEvidence:j.description,zeroExperienceSourceUrl:j.url}));
  if(!hasEvidence)diagnostics.noExperienceEvidence++;
- if(locationOK&&hasEvidence){matched.push({...j,description:j.description.slice(0,850),matchScore:s.value,matchReason:s.reason,languageStatus:"English requirement not independently confirmed",availabilityStatus:"Listed by public job feed; verify before applying",zeroExperienceEvidence:j.description.slice(0,1500),zeroExperienceSourceUrl:j.url,eligibilityStatus:/\\b(israel|tel aviv|herzliya|raanana|ra'anana|ramat gan)\\b/i.test(j.location)?"Israel listing":"Remote — Israel eligibility not verified"});continue}
+ if(locationOK&&hasEvidence){matched.push({...j,description:j.description.slice(0,850),matchScore:s.value,matchReason:s.reason,languageStatus:"English requirement not independently confirmed",availabilityStatus:"Listed by public job feed; verify before applying",zeroExperienceEvidence:j.description.slice(0,1500),zeroExperienceSourceUrl:j.url,eligibilityStatus:/\b(israel|tel aviv|herzliya|raanana|ra'anana|ramat gan)\b/i.test(j.location)?"Israel listing":"Remote — Israel eligibility not verified"});continue}
  // Review-only discovery: unknown eligibility is not permission to submit.
  if(!senior.test(j.title)&&!explicitExperience.test(j.description)&&junior.test(j.title)&&s.value>=45){
   reviewCandidates.push({title:j.title,company:j.company,location:j.location,url:j.url,source:j.source,matchScore:s.value,matchReason:s.reason,reviewReason:locationOK?"Experience requirement not explicitly verified":"Location, language or remote-from-Israel eligibility not verified"});
