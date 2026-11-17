@@ -52,7 +52,19 @@ export async function personalApi(request, env, url, searchHandler) {
     await env.DB.prepare("DELETE FROM auth_sessions WHERE expires_at <= datetime('now')").run();
     return response({token,expiresInSeconds:43200});
   }
-  if (!(await authorized(request, env.DB))) return response({error:"Please sign in."},401);
+  // Dedicated machine credential: read-only access to screened job handoffs.
+  // Never authorize profile edits, queue mutations, or application submission with this key.
+  const machinePath="/api/private/recruitment/application-executor/handoff";
+  let machineAuthorized=false;
+  if(path===machinePath&&method==="POST"&&env.CAREERFINDER_AUTOMATION_KEY){
+    const supplied=request.headers.get("X-CareerFinder-Automation-Key")||"";
+    if(/^[a-f0-9]{64}$/.test(supplied)&&/^[a-f0-9]{64}$/.test(env.CAREERFINDER_AUTOMATION_KEY)){
+      const a=encoder.encode(supplied),b=encoder.encode(env.CAREERFINDER_AUTOMATION_KEY);
+      let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
+      machineAuthorized=diff===0;
+    }
+  }
+  if (!machineAuthorized && !(await authorized(request, env.DB))) return response({error:"Please sign in."},401);
   if (path === "/api/private/logout" && method === "POST") {
     await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(await sha256(tokenFrom(request))).run();
     return response({ok:true});
