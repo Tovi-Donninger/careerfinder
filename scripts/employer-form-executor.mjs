@@ -38,7 +38,8 @@ try{
  // Never invent answers to screening, work authorization, compensation or consent questions.
  const required=await page.locator('input[required],select[required],textarea[required]').evaluateAll(nodes=>nodes.filter(el=>!el.disabled&&!el.value&&!["hidden","submit","checkbox","radio","file"].includes(el.type)).map(el=>el.name||el.id||"unnamed required field"));
  if(required.length)throw Error("Required questions need review: "+required.slice(0,12).join(", "));
- if(!submit){receipt.status="Prepared";receipt.reason="Form prepared for review; rerun with --submit after inspecting it";return}
+ if(!submit){receipt.status="Prepared";receipt.reason="Form prepared for review; rerun with --submit after inspecting it";}
+ if(submit){
  const buttons=page.getByRole("button",{name:/^(submit application|send application|apply now|submit)$/i});
  if(await buttons.count()!==1)throw Error("Unambiguous submission button not found");
  if(!args.includes("--confirm-authorized"))throw Error("Submission requires --submit --confirm-authorized (explicit permission for this employer application)");
@@ -48,6 +49,7 @@ try{
  const match=after.match(/(?:thank you for applying|application (?:has been |was )?submitted|application received|we (?:have )?received your application|successfully applied)/i);
  if(!match)throw Error("Submission clicked but no employer confirmation found; do not retry until checked for duplicates");
  receipt.submitted=true;receipt.status="Submitted";receipt.confirmation=match[0];receipt.confirmationPage=page.url();
+ }
 } catch(error){receipt.reason=error.message; if(receipt.status!=="Prepared")receipt.status="Needs review"}
 finally{
  await mkdir("application-receipts",{recursive:true});
