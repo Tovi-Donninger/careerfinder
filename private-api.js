@@ -114,7 +114,17 @@ export async function personalApi(request, env, url, searchHandler) {
         }
       }else skipped++;
     }
-    return response({ok:true,found:jobs.length,stored,skipped,reviewCandidates:(data.reviewCandidates||[]).slice(0,10),diagnostics:data.diagnostics||{},sourceDiagnostics:data.sourceDiagnostics||[],errors:data.errors||[],automaticSubmission:false,verificationRequired:true});
+    let reviewStored=0;
+    for(const j of (data.reviewCandidates||[]).slice(0,50)){
+      if(!j.title||!j.company||!/^https:\\/\\//i.test(j.url||""))continue;
+      const id=crypto.randomUUID();
+      const result=await env.DB.prepare("INSERT INTO recruitment_jobs(id,url,title,company,location,work_arrangement,employment_type,salary,match_score,match_reason,language_evidence,eligibility_evidence,verification_status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING").bind(id,j.url,String(j.title).slice(0,250),String(j.company).slice(0,250),String(j.location||"").slice(0,250),"Unverified","","",Number(j.matchScore)||null,String(j.matchReason||"").slice(0,2500),"Not confirmed","Not confirmed","Unverified",String(j.source||"Public feed").slice(0,150)).run();
+      if(result.meta?.changes){
+        await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Needs review',?) ON CONFLICT(job_id) DO NOTHING").bind(crypto.randomUUID(),id,"Discovery only: "+String(j.reviewReason||"Eligibility unknown").slice(0,1000)+". Verify vacancy and employer application URL before applying.").run();
+        reviewStored++;
+      }
+    }
+    return response({ok:true,found:jobs.length,stored,skipped,reviewStored,reviewCandidates:(data.reviewCandidates||[]).slice(0,10),diagnostics:data.diagnostics||{},sourceDiagnostics:data.sourceDiagnostics||[],errors:data.errors||[],automaticSubmission:false,verificationRequired:true});
   }
   if (path === "/api/private/recruitment/jobs" && method === "GET") {
     const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url ORDER BY j.discovered_at DESC LIMIT 500").all();
