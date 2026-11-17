@@ -116,7 +116,7 @@ export async function personalApi(request, env, url, searchHandler) {
     }
     let reviewStored=0;
     for(const j of (data.reviewCandidates||[]).slice(0,50)){
-      if(!j.title||!j.company||!/^https:\\/\\//i.test(j.url||""))continue;
+      if(!j.title||!j.company||!/^https:\/\//i.test(j.url||""))continue;
       const id=crypto.randomUUID();
       const result=await env.DB.prepare("INSERT INTO recruitment_jobs(id,url,title,company,location,work_arrangement,employment_type,salary,match_score,match_reason,language_evidence,eligibility_evidence,verification_status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO NOTHING").bind(id,j.url,String(j.title).slice(0,250),String(j.company).slice(0,250),String(j.location||"").slice(0,250),"Unverified","","",Number(j.matchScore)||null,String(j.matchReason||"").slice(0,2500),"Not confirmed","Not confirmed","Unverified",String(j.source||"Public feed").slice(0,150)).run();
       if(result.meta?.changes){
