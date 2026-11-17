@@ -106,6 +106,12 @@ export async function personalApi(request, env, url, searchHandler) {
       if(result.meta?.changes){
         await env.DB.prepare("INSERT INTO recruitment_zero_experience_evidence(job_url,evidence,source_url) VALUES(?,?,?) ON CONFLICT(job_url) DO NOTHING").bind(j.url,String(j.zeroExperienceEvidence).slice(0,1500),String(j.zeroExperienceSourceUrl||j.url).slice(0,1000)).run();
         stored++;
+        // Discovery is not proof of eligibility. Surface promising jobs for
+        // human verification without granting permission to auto-submit.
+        if(Number(j.matchScore)>=85){
+          const queueId=crypto.randomUUID();
+          await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Needs review',?) ON CONFLICT(job_id) DO NOTHING").bind(queueId,id,"New vacancy discovered automatically. Verify employer opening, English requirements, Israel eligibility and direct application URL before proceeding.").run();
+        }
       }else skipped++;
     }
     return response({ok:true,found:jobs.length,stored,skipped,automaticSubmission:false,verificationRequired:true});
