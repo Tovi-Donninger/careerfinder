@@ -4,8 +4,8 @@ export function routeApplication(url) {
   let u;try{u=new URL(url)}catch{return {channel:"unsupported",supported:false,reason:"Invalid vacancy URL"}}
   if(u.protocol!=="https:")return {channel:"unsupported",supported:false,reason:"HTTPS vacancy URL required"};
   const host=u.hostname.toLowerCase();
-  if(/(^|\.)linkedin\.com$/.test(host))return {channel:"linkedin",supported:false,reason:"LinkedIn application requires a permitted user-authorized integration or manual completion"};
-  if(/(^|\.)indeed\.(com|co\.[a-z]{2})$/.test(host))return {channel:"indeed",supported:false,reason:"Indeed application requires a permitted user-authorized integration or manual completion"};
-  if(/(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|workable\.com|bamboohr\.com|personio\.com|teamtailor\.com)$/.test(host))return {channel:"employer-ats",supported:false,reason:"Employer ATS API credentials or approved submission integration required"};
-  return {channel:"employer-website",supported:false,reason:"Employer website submission method not verified"};
+  if(/(^|\.)linkedin\.com$/.test(host))return {channel:"linkedin",supported:false,fallback:"employer-website",reason:"LinkedIn submission unavailable: locate and verify the identical vacancy on the employer career site"};
+  if(/(^|\.)indeed\.(com|co\.[a-z]{2})$/.test(host))return {channel:"indeed",supported:false,fallback:"employer-website",reason:"Indeed submission unavailable: locate and verify the identical vacancy on the employer career site"};
+  if(/(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com|workable\.com|bamboohr\.com|personio\.com|teamtailor\.com)$/.test(host))return {channel:"employer-ats",supported:false,fallback:"authorized-browser-workflow",reason:"Use employer-approved ATS integration or permitted browser form completion"};
+  return {channel:"employer-website",supported:false,fallback:"authorized-browser-workflow",reason:"Employer application form requires permitted browser completion and verified receipt"};
 }
