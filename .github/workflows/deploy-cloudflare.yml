@@ -40,6 +40,14 @@ jobs:
         run: npm install --no-save wrangler@4
       # Database migrations and password provisioning are separate administrative operations.
       # Do not rerun schema creation or rotate login credentials on each code deployment.
+      - name: Check Worker JavaScript syntax
+        run: |
+          node --check worker.js
+          node --check private-api.js
+          node --check free-search.js
+          node --check application-executor.js
+          node --check application-channels.js
+          node --check zero-experience.js
       - name: Deploy Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
