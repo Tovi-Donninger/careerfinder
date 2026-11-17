@@ -1,0 +1,51 @@
+name: Prepare CareerFinder application in Browserless (no submission)
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: 'Exact CareerFinder private job ID'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: careerfinder-browser-preparation
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check private credentials
+        env:
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          CAREERFINDER_SESSION_TOKEN: ${{ secrets.CAREERFINDER_SESSION_TOKEN }}
+          CAREERFINDER_CV_BASE64: ${{ secrets.CAREERFINDER_CV_BASE64 }}
+        run: |
+          test -n "$BROWSERLESS_TOKEN" || { echo "::error::Missing BROWSERLESS_TOKEN"; exit 1; }
+          test -n "$CAREERFINDER_SESSION_TOKEN" || { echo "::error::Missing CAREERFINDER_SESSION_TOKEN"; exit 1; }
+          test -n "$CAREERFINDER_CV_BASE64" || { echo "::error::Missing CAREERFINDER_CV_BASE64"; exit 1; }
+      - name: Install browser client
+        run: npm install --no-save --no-package-lock playwright-core@1.56.1
+      - name: Prepare one screened job (NEVER SUBMIT)
+        env:
+          BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
+          CAREERFINDER_SESSION_TOKEN: ${{ secrets.CAREERFINDER_SESSION_TOKEN }}
+          CAREERFINDER_CV_BASE64: ${{ secrets.CAREERFINDER_CV_BASE64 }}
+          JOB_ID: ${{ inputs.job_id }}
+          CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP: '900'
+          CAREERFINDER_BROWSER_RESERVE_UNITS: '4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -f /tmp/careerfinder-cv.pdf private-application-*.json; rm -rf application-receipts .careerfinder-private' EXIT
+          printf '%s' "$CAREERFINDER_CV_BASE64" | base64 --decode > /tmp/careerfinder-cv.pdf
+          test -s /tmp/careerfinder-cv.pdf
+          node scripts/fetch-application-handoff.mjs "$JOB_ID" /tmp/careerfinder-cv.pdf
+          node scripts/employer-form-executor.mjs --application "private-application-${JOB_ID//[^a-zA-Z0-9_-]/}.json"
+          echo "Preparation completed without submission. Private screenshots and receipts deleted on runner exit."
