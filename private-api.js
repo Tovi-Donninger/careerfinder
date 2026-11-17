@@ -168,7 +168,7 @@ export async function personalApi(request, env, url, searchHandler) {
       let parsed;
       try{parsed=new URL(job.url);if(parsed.protocol!=="https:"||parsed.port||parsed.username||parsed.password)throw Error("Invalid URL")}catch{results.push({title:job.title,result:"Needs review: invalid URL"});continue}
       const host=parsed.hostname.toLowerCase();
-      if(!["boards.greenhouse.io","job-boards.greenhouse.io","jobs.lever.co","jobs.ashbyhq.com"].includes(host)){results.push({title:job.title,result:"Needs review: employer host not supported yet"});continue}
+      if(!["boards.greenhouse.io","job-boards.greenhouse.io","jobs.lever.co","jobs.ashbyhq.com","remotive.com","www.remotive.com","remoteok.com","www.remoteok.com","arbeitnow.com","www.arbeitnow.com"].includes(host)){results.push({title:job.title,result:"Needs review: host not on the trusted job-source list"});continue}
       try{
         const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
         let page;
