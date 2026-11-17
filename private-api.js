@@ -162,13 +162,14 @@ export async function personalApi(request, env, url, searchHandler) {
     const saved=await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
     if(!saved)return response({error:"Save a cloud candidate profile before AI verification"},409);
     let profile;try{profile=JSON.parse(saved.profile_json)}catch{return response({error:"Invalid saved candidate profile"},500)}
-    const rows=await env.DB.prepare("SELECT q.id AS queue_id,j.id AS job_id,j.url,j.title,j.company,j.location,q.reason FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Needs review' AND (q.reason IS NULL OR q.reason NOT LIKE 'AI assessment (%' AND q.reason NOT LIKE 'AI assessment JSON:%') ORDER BY q.updated_at DESC LIMIT 3").all();
+    const rows=await env.DB.prepare("SELECT q.id AS queue_id,j.id AS job_id,j.url,j.title,j.company,j.location,q.reason FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Needs review' AND (q.reason IS NULL OR (q.reason NOT LIKE 'AI assessment (%' AND q.reason NOT LIKE 'AI assessment JSON:%' AND q.reason NOT LIKE 'AI verification deferred:%')) ORDER BY q.updated_at ASC LIMIT 5").all();
     const results=[];
+    const defer=async(job,reason)=>{await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='Needs review'").bind("AI verification deferred: "+String(reason).slice(0,400)+". Manual review required; no application submitted.",job.queue_id).run();};
     for(const job of rows.results||[]){
       let parsed;
-      try{parsed=new URL(job.url);if(parsed.protocol!=="https:"||parsed.port||parsed.username||parsed.password)throw Error("Invalid URL")}catch{results.push({title:job.title,result:"Needs review: invalid URL"});continue}
+      try{parsed=new URL(job.url);if(parsed.protocol!=="https:"||parsed.port||parsed.username||parsed.password)throw Error("Invalid URL")}catch{await defer(job,"Invalid vacancy URL");results.push({title:job.title,result:"Needs review: invalid URL"});continue}
       const host=parsed.hostname.toLowerCase();
-      if(!["boards.greenhouse.io","job-boards.greenhouse.io","jobs.lever.co","jobs.ashbyhq.com","remotive.com","www.remotive.com","remoteok.com","www.remoteok.com","arbeitnow.com","www.arbeitnow.com","jobs.smartrecruiters.com","apply.workable.com","jobs.workable.com","jobs.jobvite.com","www.linkedin.com","www.indeed.com","wellfound.com","www.wellfound.com"].includes(host)||host.endsWith(".myworkdayjobs.com")||host.endsWith(".bamboohr.com")){results.push({title:job.title,result:"Needs review: host not on the trusted job-source list"});continue}
+      if(!["boards.greenhouse.io","job-boards.greenhouse.io","jobs.lever.co","jobs.ashbyhq.com","remotive.com","www.remotive.com","remoteok.com","www.remoteok.com","arbeitnow.com","www.arbeitnow.com","jobs.smartrecruiters.com","apply.workable.com","jobs.workable.com","jobs.jobvite.com","www.linkedin.com","www.indeed.com","wellfound.com","www.wellfound.com"].includes(host)||host.endsWith(".myworkdayjobs.com")||host.endsWith(".bamboohr.com")){await defer(job,"Host not on the trusted job-source list");results.push({title:job.title,result:"Needs review: host not on the trusted job-source list"});continue}
       try{
         const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),8000);
         let page;
@@ -198,7 +199,7 @@ export async function personalApi(request, env, url, searchHandler) {
         const note="AI assessment JSON:"+JSON.stringify(record);
         await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='Needs review'").bind(note.slice(0,6000),job.queue_id).run();
         results.push({jobId:job.job_id,title:job.title,result:assessment.decision,score:assessment.score,summary:assessment.summary,blockers:assessment.blockers,evidence:assessment.evidence.slice(0,5)});
-      }catch(e){results.push({jobId:job.job_id,title:job.title,result:"Needs review: AI assessment could not complete",error:String(e.message||e).slice(0,160)})}
+      }catch(e){await defer(job,"AI assessment could not complete: "+String(e.message||e));results.push({jobId:job.job_id,title:job.title,result:"Needs review: AI assessment could not complete",error:String(e.message||e).slice(0,160)})}
     }
     return response({ok:true,checked:results.length,results,reviewMethod:"AI assessment of employer vacancy and saved CV",automaticApproval:false,automaticSubmission:false});
   }
