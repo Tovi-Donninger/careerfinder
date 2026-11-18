@@ -6,6 +6,7 @@ import { readFile, writeFile, mkdir, open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { inspectVacancy } from "./vacancy-verification.mjs";
+import { digitsOnlyPhone, phoneFieldNeedsDigits, pickSubmitButton } from "./form-helpers.mjs";
 
 const args=process.argv.slice(2);
 const value=flag=>{const i=args.indexOf(flag);return i>=0?args[i+1]:undefined};
@@ -61,7 +62,22 @@ try{
  await fill(['input[autocomplete="given-name"]','input[name="first_name"]','input[name="firstName"]','input[id*="first_name"]'],profile.firstName);
  await fill(['input[autocomplete="family-name"]','input[name="last_name"]','input[name="lastName"]','input[id*="last_name"]'],profile.lastName);
  await fill(['input[autocomplete="email"]','input[type="email"]','input[name="email"]'],profile.email);
- await fill(['input[autocomplete="tel"]','input[type="tel"]','input[name="phone"]'],profile.phone);
+ // Phone: use digits only (country code kept) when the field is numeric or rejects "+"/spaces.
+ if(profile.phone){
+  for(const selector of ['input[autocomplete="tel"]','input[type="tel"]','input[name="phone"]','input[name*="phone" i]']){
+   const loc=page.locator(selector).first();
+   if(!(await loc.count())||!(await loc.isVisible())||!(await loc.isEnabled()))continue;
+   const attrs=await loc.evaluate(el=>({type:el.type,pattern:el.getAttribute("pattern")||"",inputMode:el.inputMode||""}));
+   const digits=digitsOnlyPhone(profile.phone);
+   if(phoneFieldNeedsDigits(attrs))await loc.fill(digits);
+   else{
+    try{await loc.fill(String(profile.phone))}catch{await loc.fill(digits)}
+    const ok=await loc.evaluate(el=>!!el.value&&el.checkValidity());
+    if(!ok)await loc.fill(digits);
+   }
+   break;
+  }
+ }
  await fill(['input[name*="linkedin" i]','input[id*="linkedin" i]'],profile.linkedin);
  const cvPath=application.cvFile?resolve(application.cvFile):"";
  if(cvPath){const input=page.locator('input[type="file"]').first();if(await input.count())await input.setInputFiles(cvPath)}
@@ -83,8 +99,17 @@ try{
  if(unchecked.length)throw Error("Required selections or consent need review: "+unchecked.slice(0,12).join(", "));
  if(!submit){receipt.status="Prepared";receipt.reason="Form prepared for review; rerun with --submit after inspecting it";}
  if(submit){
- const buttons=page.getByRole("button",{name:/^(submit application|send application|submit)$/i});
- if(await buttons.count()!==1)throw Error("Unambiguous submission button not found");
+ // Only a button inside the application form (the form holding the CV upload or email
+ // field) counts, so a job-page "Apply" link that just opens the form is never treated
+ // as the final submission.
+ const form=page.locator('form:has(input[type="file"]), form:has(input[type="email"])').first();
+ if(!(await form.count()))throw Error("Application form not found on the employer page");
+ const candidates=form.locator('button, input[type="submit"]');
+ const found=[];
+ for(let i=0;i<await candidates.count();i++){const el=candidates.nth(i);found.push({index:i,visible:await el.isVisible(),label:(await el.evaluate(n=>n.tagName==="INPUT"?n.value:(n.innerText||n.getAttribute("aria-label")||""))).trim()})}
+ const chosen=pickSubmitButton(found);
+ if(!chosen)throw Error("Unambiguous submission button not found in the application form");
+ const buttons=candidates.nth(chosen.index);
  if(!args.includes("--confirm-authorized"))throw Error("Submission requires --submit --confirm-authorized (explicit permission for this employer application)");
  receipt.reason="Submission button clicked; awaiting employer confirmation. Do not retry automatically.";
  await buttons.click({timeout:12000});
