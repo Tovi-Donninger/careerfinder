@@ -52,7 +52,7 @@ const valid={title:"SDR",company:"Example",url:"https://example.com/jobs/1?utm_s
 
 test("POST: valid sales job returns ok and stores category-tagged evidence",async()=>{
   const env=mockEnv();const res=await post(env,[valid]);
-  assert.equal(res.status,200);assert.deepEqual(await res.json(),{ok:true,received:1});
+  assert.equal(res.status,200);const out=await res.json();assert.equal(out.ok,true);assert.equal(out.received,1);
   const ev=env.calls.find(c=>/recruitment_zero_experience_evidence/.test(c.sql));
   assert.equal(ev.args[1],"[role:sales] 0-1 years of sales experience");
 });

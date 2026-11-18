@@ -21,3 +21,12 @@ Each job carries a `roleCategory`: `hr_recruitment`, `admin_ops`, `sales` (SDR/B
 - Never represent a discovered or queued job as an application submitted. Require external submission confirmation.
 
 This document is the authoritative hard filter for CareerFinder discovery, matching and future application automation.
+
+## Grok Bot discoveries and the application pipeline
+
+`POST /api/private/recruitment/jobs` (discovery key) accepts an optional per-job boolean `queueForApplication`.
+
+- Absent or `false`: the job is saved and **held** (an Application queue row with status `Needs review`, provider `grok-hold`), so the scheduled browser pipeline never applies to it.
+- `true`: the job must pass the pipeline gates (match score ≥ 85, verification status "Confirmed open"/"accepting applications", English confirmed, Israel eligibility confirmed, Israel location or stated eligibility from Israel, employer URL rather than LinkedIn/Indeed, not flagged for Tovi). It is then **released**: any earlier Grok hold is removed and `application-executor/next` can select it.
+- Re-posting an existing URL updates its match reason, verification status and experience evidence.
+- Anything that needs Tovi is marked on the dashboard with "Needs your attention": a verification status of `needs_review`, a match reason starting `NEEDS TOVI:`, a blocked handoff, or a browser run that held the form or reports a submission.
