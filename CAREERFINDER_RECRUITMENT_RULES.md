@@ -1,12 +1,20 @@
 # CareerFinder recruitment and automatic-application eligibility rules
 
-## Mandatory zero-experience requirement
-Only target roles for which **zero previous professional experience is required**. This is a hard eligibility gate, not a scoring preference.
+## Experience requirement, by role category
+Each job carries a `roleCategory`: `hr_recruitment`, `admin_ops`, `sales` (SDR/BDR/inside sales) or `customer_success`. This is a hard eligibility gate, not a scoring preference.
+
+- **HR / recruitment** (`hr_recruitment`, or no `roleCategory` given): **zero previous professional experience** is required, with explicit evidence. Nothing below relaxes this.
+- **Office support / admin / operations, sales and customer success** (`admin_ops`, `sales`, `customer_success`): zero experience is accepted, and so is a requirement of **at most 1 year**. The evidence must state it explicitly (for example "0-1 years", "up to 1 year", "1 year of experience", "1+ years", "at least one year", "6 months"). Reject anything above 1 year: "1-2 years", "2+ years", "minimum two years", more than 12 months, "several years". "1+ years" and "at least one year" are allowed because the mandatory minimum is one year.
+- An unknown `roleCategory` value is rejected. Evidence without a clear experience statement is rejected (fail closed).
+- The category is stored as a `[role:<category>] ` prefix on the stored evidence text, so no schema change is needed. HR evidence is stored unprefixed.
+
+### Zero-experience rules (apply to HR/recruitment, and are always accepted for the other categories)
 
 - Accept vacancies that explicitly say no prior experience is required, no experience necessary, training provided with no experience required, or explicitly welcome candidates without work experience.
-- Reject vacancies requiring 1+ years in any job function, industry, sales environment, SaaS, or other professional capacity, even if labelled junior, graduate or entry level.
+- For HR/recruitment, reject vacancies requiring 1+ years in any job function, industry, sales environment, SaaS, or other professional capacity, even if labelled junior, graduate or entry level.
 - Reject vacancies where the experience requirement cannot be verified from the employer's vacancy posting. Do not infer that entry-level or junior means zero experience.
-- Capture the exact evidence and source URL for the zero-experience requirement in the job record.
+- Capture the exact evidence (quoted from the employer's posting) and its HTTPS source URL for the experience requirement in the job record.
+- The same category rule is applied when saving discoveries, importing the recruitment inbox, building handoffs and checking the employer page before a browser application.
 - Do not queue or automatically submit an application unless this requirement and all other eligibility gates are satisfied.
 - Existing experience may improve fit but must never override a required-experience exclusion.
 - Continue to require explicit English-language eligibility and Israel/on-site or genuinely remote-from-Israel eligibility, and permitted submission channels.
