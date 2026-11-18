@@ -47,10 +47,10 @@ export async function personalApi(request, env, url, searchHandler) {
     if (!(await checkPassword(body.password, env.ADMIN_PASSWORD_HASH))) return response({error:"Incorrect password"},401);
     const token = hex(crypto.getRandomValues(new Uint8Array(32)));
     const hash = await sha256(token);
-    await env.DB.prepare("INSERT INTO auth_sessions(token_hash, expires_at) VALUES (?, datetime('now','+12 hours'))").bind(hash).run();
+    await env.DB.prepare("INSERT INTO auth_sessions(token_hash, expires_at) VALUES (?, datetime('now','+24 hours'))").bind(hash).run();
     await env.DB.prepare("DELETE FROM auth_attempts").run();
     await env.DB.prepare("DELETE FROM auth_sessions WHERE expires_at <= datetime('now')").run();
-    return response({token,expiresInSeconds:43200});
+    return response({token,expiresInSeconds:86400});
   }
   // Dedicated machine credential: read-only access to screened job handoffs.
   // Never authorize profile edits, queue mutations, or application submission with this key.

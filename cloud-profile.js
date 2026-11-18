@@ -45,7 +45,7 @@
     $("cloud-auth-state").textContent=loggedIn?"Signed in":"Signed out";
   }
   async function call(path,method="GET",body){
-    if(token&&expiresAt<=Date.now())signedOut("Your 12-hour session expired. Please sign in again.");
+    if(token&&expiresAt<=Date.now())signedOut("Your 24-hour session expired. Please sign in again.");
     const headers={"Content-Type":"application/json"};
     if(token)headers.Authorization="Bearer "+token;
     const response=await fetch(API+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
@@ -73,10 +73,10 @@
     try{
       const result=await call("/api/private/login","POST",{password:input.value});
       if(!/^[a-f0-9]{64}$/.test(result.token||""))throw Error("Unexpected session response");
-      token=result.token;expiresAt=Date.now()+Math.min(Number(result.expiresInSeconds)||43200,43200)*1000;
+      token=result.token;expiresAt=Date.now()+Math.min(Number(result.expiresInSeconds)||86400,86400)*1000;
       remember=requestedRemember;
       save();
-      render(remember?"Signed in. This browser will remember you for up to 12 hours.":"Signed in. This tab will remember you for up to 12 hours.");
+      render(remember?"Signed in. This browser will remember you for up to 24 hours.":"Signed in. This tab will remember you for up to 24 hours.");
       refresh();
     }catch(err){render("Sign-in failed: "+err.message)}
     finally{input.value=""}
