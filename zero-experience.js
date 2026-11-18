@@ -66,6 +66,10 @@ export function pageHasNoExperienceDemand(pageText) {
   return !PAGE_EXPERIENCE_DEMAND.test(text)&&!exceedsOneYear(text);
 }
 
+// Non-HR only: wording that says experience is optional or that the role is entry level/junior.
+// Always combined with exceedsOneYear, so "junior, 3 years of experience" is still rejected.
+export const NON_HR_OPEN_EXPERIENCE=/\bexperience\b[^.;\n]{0,160}?\bnot (?:required|mandatory|necessary|a must)\b|\bentry[- ]level\b|\bmin(?:imum|\.)?\s*experience\s*:?\s*(?:entry[- ]level|none|0)\b|\bjunior\b/i;
+
 // Role-aware gate. job: {zeroExperienceEvidence, zeroExperienceSourceUrl, roleCategory?}
 export function experienceEvidence(job) {
   const category=normalizeRoleCategory(job.roleCategory);
@@ -76,7 +80,7 @@ export function experienceEvidence(job) {
   if(!evidence||!/^https:\/\//i.test(url))return false;
   if(NO_STATED_EXPERIENCE.test(evidence))return noStatedExperienceEvidence(evidence);
   if(exceedsOneYear(evidence))return false;
-  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence);
+  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence)||NON_HR_OPEN_EXPERIENCE.test(evidence);
 }
 
 // The evidence table has no category column, so non-HR categories are stored as a
@@ -105,5 +109,5 @@ export function pageExperienceOk(pageText, roleCategory) {
   if(category===null||category==="hr_recruitment")return EXPLICIT_ZERO.test(text);
   const sentences=text.split(/(?<=[.!?\n])\s+|\n+/).filter(s=>/experience|years?|months?/i.test(s)).join(" . ");
   if(exceedsOneYear(sentences))return false;
-  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences);
+  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences)||NON_HR_OPEN_EXPERIENCE.test(text);
 }

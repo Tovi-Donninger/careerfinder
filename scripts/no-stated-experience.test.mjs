@@ -27,3 +27,21 @@ test("language check: optional languages pass, demanded ones block",()=>{
   for(const t of ["English native – Required German / Hebrew – advantage Strong","Must be a Native English speaker, Hebrew is a plus, but not required","Hebrew is nice to have","German or French would be an advantage","Spanish (preferred)","Hebrew - not required"])assert.equal(otherLanguageRequired(t),false,t);
   for(const t of ["Fluent Hebrew required","Hebrew – required","Hebrew: mandatory","Native Hebrew speaker","Fluency in German","Required: Hebrew and English"])assert.equal(otherLanguageRequired(t),true,t);
 });
+
+test("non-HR: optional / entry-level / junior wording accepted",()=>{
+  for(const t of ["Previous sales experience is considered an asset but is not required","Experience with CRM tools is a plus, but not required","Experience is an advantage but not required","Entry Level","This is an entry-level role","Min. Experience: Entry Level","0-1 years of experience","Up to 1 year of experience","Junior Sales Development Representative"])
+    for(const c of ["sales","admin_ops","customer_success"])assert.equal(experienceEvidence(job(c,t)),true,c+": "+t);
+});
+test("non-HR: optional wording still rejected when more than a year is demanded",()=>{
+  for(const t of ["Junior role, 3 years of experience required","Entry level, minimum two years of experience","Experience with Salesforce is not required; 2+ years of sales experience"])assert.equal(experienceEvidence(job("sales",t)),false,t);
+});
+test("HR stays strict with optional / entry-level / junior wording",()=>{
+  for(const t of ["Entry Level","Junior Recruiter","Experience is a plus but not required","Min. Experience: Entry Level","0-1 years of experience"])assert.equal(experienceEvidence(job("hr_recruitment",t)),false,t);
+});
+test("runner page check accepts entry-level / optional wording for non-HR only",()=>{
+  const p="Customer Support Representative at Example Co, Tel Aviv, Israel. Min. Experience: Entry Level. Previous support experience is considered an asset but is not required. Native English. We offer training and a great team. Apply with your CV.";
+  const b={pageText:p,title:"Customer Support Representative",company:"Example Co",sourceEvidence:{roleCategory:"customer_success",zeroExperience:"Min. Experience: Entry Level",language:"Native English",eligibility:"Israeli citizen; role in Israel"}};
+  assert.deepEqual(inspectVacancy(b),{verified:true,failures:[]});
+  assert.equal(inspectVacancy({...b,pageText:p+" Requirements: 2+ years of support experience."}).verified,false);
+  assert.equal(inspectVacancy({...b,sourceEvidence:{...b.sourceEvidence,roleCategory:"hr_recruitment"}}).verified,false);
+});

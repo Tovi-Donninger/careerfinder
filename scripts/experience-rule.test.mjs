@@ -19,7 +19,7 @@ test("unknown category rejected",()=>assert.equal(experienceEvidence(job("market
 test("missing category keeps legacy zero-experience behaviour",()=>{assert.equal(experienceEvidence(job(undefined,"No experience required")),true);assert.equal(experienceEvidence(job(undefined,"No experience required")),zeroExperienceEvidence(job(undefined,"No experience required")))});
 test("accepted phrasings up to 1 year",()=>{for(const t of ["up to 1 year of experience","at least one year of experience","6 months of relevant experience","entry level, 1 year of experience","no experience required","at least a year of experience","minimum 1 year experience"])assert.equal(experienceEvidence(job("sales",t)),true,t)});
 test("rejected phrasings above 1 year",()=>{for(const t of ["minimum two years of experience","1-3 years of experience","2+ years of experience","18 months of experience","1.5 years experience","several years of experience","no experience required but 3 years preferred","at least 1 year, ideally 3-5 years experience","over a year of experience"])assert.equal(experienceEvidence(job("customer_success",t)),false,t)});
-test("evidence without any experience statement rejected",()=>assert.equal(experienceEvidence(job("sales","Junior role in a growing team")),false));
+test("evidence without any experience statement rejected",()=>assert.equal(experienceEvidence(job("sales","Exciting role in a growing team")),false));
 
 test("stored evidence round trip keeps category and gate",()=>{
   const j=job("sales","0-1 years of experience");const stored=encodeStoredEvidence(j);
