@@ -33,6 +33,25 @@ function validProfile(p) {
   return Object.keys(p).every(k => fields.includes(k) && typeof p[k] === "string" && p[k].length <= 30000);
 }
 const statuses = ["Discovered","Prepared","Submitted","Interview","Rejected","Blocked"];
+// Items Tovi must look at are marked with this prefix (Grok Bot notes, browser holds, blocked handoffs).
+export const ATTENTION_PREFIX = "NEEDS TOVI:";
+export function needsAttention(job) {
+  return /needs[_ ]review/i.test(String(job?.verification||job?.verificationStatus||job?.verification_status||""))||String(job?.reason??job?.matchReason??job?.match_reason??"").trim().toUpperCase().startsWith(ATTENTION_PREFIX);
+}
+// Gates a saved discovery must pass before Grok Bot may release it to the scheduled
+// browser pipeline. They mirror application-executor/next, the handoff assessment and
+// the executor's own sourceEvidence checks, so a released job is not stuck at handoff.
+export function applicationGateReasons(j) {
+  const reasons=[];
+  if(!Number.isInteger(j.score)||j.score<85)reasons.push("matchScore must be an integer of at least 85");
+  if(!/confirmed open|accepting applications/i.test(j.verification))reasons.push("verificationStatus must say 'Confirmed open' or 'accepting applications'");
+  if(!/\benglish\b/i.test(j.language)||/not confirmed|unclear|verify/i.test(j.language))reasons.push("languageEvidence must confirm English without 'not confirmed', 'unclear' or 'verify'");
+  if(!j.eligibility||!/\bisrael\b/i.test(j.eligibility)||/not confirmed|unclear|verify|potential gap/i.test(j.eligibility))reasons.push("eligibilityEvidence must confirm Israel eligibility without 'not confirmed', 'unclear', 'verify' or 'potential gap'");
+  if(!/israel|tel aviv|herzliya|raanana|ra'anana|ramat gan|petah tikva|jerusalem|haifa|beer sheva/i.test(j.location)&&!/israel.*eligible|eligible.*israel/i.test(j.eligibility))reasons.push("location must be in Israel, or eligibilityEvidence must state the candidate is eligible from Israel");
+  if(["linkedin","indeed"].includes(routeApplication(j.url).channel))reasons.push("url must be the employer's own vacancy page, not LinkedIn or Indeed");
+  if(needsAttention(j))reasons.push("jobs flagged for Tovi (verificationStatus needs_review or matchReason starting 'NEEDS TOVI:') cannot be released for automatic application");
+  return reasons;
+}
 export async function personalApi(request, env, url, searchHandler) {
   if (!env.DB || !env.ADMIN_PASSWORD_HASH) return response({error:"Secure workspace is not configured. Set the D1 DB binding and ADMIN_PASSWORD_HASH secret."},503);
   const path = url.pathname;
@@ -172,11 +191,31 @@ export async function personalApi(request, env, url, searchHandler) {
       if(!title||!company)return response({error:"Each job needs a title and company"},400);
       if(normalizeRoleCategory(job.roleCategory)===false)return response({error:"roleCategory must be one of hr_recruitment, admin_ops, sales, customer_success"},400);
       if(!experienceEvidence(job))return response({error:"Every job must include explicit experience evidence and its HTTPS source URL: no experience for HR/recruitment roles, at most 1 year for admin_ops, sales and customer_success roles"},400);
-      records.push({zeroEvidence:encodeStoredEvidence(job),zeroSource:clean(job.zeroExperienceSourceUrl,1000),id:crypto.randomUUID(),url:url.toString(),title,company,location:clean(job.location,250),work:clean(job.workArrangement,80),type:clean(job.employmentType,80),salary:clean(job.salary,120),score:Number.isInteger(job.matchScore)&&job.matchScore>=0&&job.matchScore<=100?job.matchScore:null,reason:clean(job.matchReason,2500),language:clean(job.languageEvidence,1500),eligibility:clean(job.eligibilityEvidence,1500),verification:clean(job.verificationStatus,80)||"Unverified",source:clean(job.source,150)});
+      if(job.queueForApplication!==undefined&&typeof job.queueForApplication!=="boolean")return response({error:"queueForApplication must be true or false"},400);
+      records.push({queueForApplication:job.queueForApplication===true,zeroEvidence:encodeStoredEvidence(job),zeroSource:clean(job.zeroExperienceSourceUrl,1000),id:crypto.randomUUID(),url:url.toString(),title,company,location:clean(job.location,250),work:clean(job.workArrangement,80),type:clean(job.employmentType,80),salary:clean(job.salary,120),score:Number.isInteger(job.matchScore)&&job.matchScore>=0&&job.matchScore<=100?job.matchScore:null,reason:clean(job.matchReason,2500),language:clean(job.languageEvidence,1500),eligibility:clean(job.eligibilityEvidence,1500),verification:clean(job.verificationStatus,80)||"Unverified",source:clean(job.source,150)});
+    }
+    for(const j of records){
+      if(!j.queueForApplication)continue;
+      const reasons=applicationGateReasons(j);
+      if(reasons.length)return response({error:"Job cannot be queued for application: "+j.url,reasons},400);
     }
     const statements=records.map(j=>env.DB.prepare(`INSERT INTO recruitment_jobs(id,url,title,company,location,work_arrangement,employment_type,salary,match_score,match_reason,language_evidence,eligibility_evidence,verification_status,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET title=excluded.title,company=excluded.company,location=excluded.location,work_arrangement=excluded.work_arrangement,employment_type=excluded.employment_type,salary=excluded.salary,match_score=excluded.match_score,match_reason=excluded.match_reason,language_evidence=excluded.language_evidence,eligibility_evidence=excluded.eligibility_evidence,verification_status=excluded.verification_status,source=excluded.source,last_seen_at=CURRENT_TIMESTAMP`).bind(j.id,j.url,j.title,j.company,j.location,j.work,j.type,j.salary,j.score,j.reason,j.language,j.eligibility,j.verification,j.source));
-    await env.DB.batch([...statements,...records.map(j=>env.DB.prepare("INSERT INTO recruitment_zero_experience_evidence(job_url,evidence,source_url) VALUES(?,?,?) ON CONFLICT(job_url) DO UPDATE SET evidence=excluded.evidence,source_url=excluded.source_url,verified_at=CURRENT_TIMESTAMP").bind(j.url,j.zeroEvidence,j.zeroSource))]);
-    return response({ok:true,received:records.length});
+    // Queue handling. The browser pipeline (application-executor/next) only picks jobs that
+    // have NO application-queue row. So:
+    //  - queueForApplication:true releases the job: any hold this route created earlier is
+    //    removed (never a row with events/receipts, and never one the pipeline created).
+    //  - otherwise the job is held with a 'Needs review' row (provider 'grok-hold') so it is
+    //    never auto-applied; the hold reason follows the latest matchReason.
+    const queueStatements=records.map(j=>j.queueForApplication
+      ? env.DB.prepare("DELETE FROM recruitment_application_queue WHERE provider='grok-hold' AND status='Needs review' AND job_id=(SELECT id FROM recruitment_jobs WHERE url=?) AND NOT EXISTS (SELECT 1 FROM recruitment_application_events e WHERE e.queue_id=recruitment_application_queue.id) AND NOT EXISTS (SELECT 1 FROM recruitment_application_receipts r WHERE r.queue_id=recruitment_application_queue.id)").bind(j.url)
+      : env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason,provider) SELECT ?,id,'Needs review',?,'grok-hold' FROM recruitment_jobs WHERE url=? ON CONFLICT(job_id) DO UPDATE SET reason=excluded.reason,updated_at=CURRENT_TIMESTAMP WHERE recruitment_application_queue.provider='grok-hold' AND recruitment_application_queue.status='Needs review'").bind(crypto.randomUUID(),(needsAttention(j)?j.reason||ATTENTION_PREFIX+" review this discovery":"Held by Grok Bot: saved as a discovery, not released for automatic application. "+j.reason).slice(0,2500),j.url));
+    await env.DB.batch([...statements,...records.map(j=>env.DB.prepare("INSERT INTO recruitment_zero_experience_evidence(job_url,evidence,source_url) VALUES(?,?,?) ON CONFLICT(job_url) DO UPDATE SET evidence=excluded.evidence,source_url=excluded.source_url,verified_at=CURRENT_TIMESTAMP").bind(j.url,j.zeroEvidence,j.zeroSource)),...queueStatements]);
+    const queue=[];
+    for(const j of records){
+      const row=await env.DB.prepare("SELECT q.status,q.provider FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE j.url=?").bind(j.url).first();
+      queue.push({url:j.url,queue:!row?"released":row.provider==="grok-hold"?"held":"in_queue",status:row?.status||null});
+    }
+    return response({ok:true,received:records.length,queue});
   }
   if (path === "/api/private/recruitment/verify-queue" && method === "POST") {
     // AI evaluates the actual employer page against the saved candidate profile.
@@ -185,7 +224,7 @@ export async function personalApi(request, env, url, searchHandler) {
     const saved=await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
     if(!saved)return response({error:"Save a cloud candidate profile before AI verification"},409);
     let profile;try{profile=JSON.parse(saved.profile_json)}catch{return response({error:"Invalid saved candidate profile"},500)}
-    const rows=await env.DB.prepare("SELECT q.id AS queue_id,j.id AS job_id,j.url,j.title,j.company,j.location,q.reason FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Needs review' AND (q.reason IS NULL OR (q.reason NOT LIKE 'AI assessment (%' AND q.reason NOT LIKE 'AI assessment JSON:%' AND q.reason NOT LIKE 'AI verification deferred:%')) ORDER BY q.updated_at ASC LIMIT 5").all();
+    const rows=await env.DB.prepare("SELECT q.id AS queue_id,j.id AS job_id,j.url,j.title,j.company,j.location,q.reason FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Needs review' AND q.provider!='grok-hold' AND (q.reason IS NULL OR (q.reason NOT LIKE 'AI assessment (%' AND q.reason NOT LIKE 'AI assessment JSON:%' AND q.reason NOT LIKE 'AI verification deferred:%')) ORDER BY q.updated_at ASC LIMIT 5").all();
     const results=[];
     const defer=async(job,reason)=>{await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='Needs review'").bind("AI verification deferred: "+String(reason).slice(0,400)+". Manual review required; no application submitted.",job.queue_id).run();};
     for(const job of rows.results||[]){
@@ -253,7 +292,11 @@ export async function personalApi(request, env, url, searchHandler) {
     const row=await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
     let profile=null;try{profile=row?JSON.parse(row.profile_json):null}catch{}
     const reasons=(await assessApplication(job,evidence,profile,{...policy,enabled:1})).reasons;
-    if(reasons.length)return response({error:"Application handoff blocked",reasons},409);
+    if(reasons.length){
+      // Record the block so the job leaves the selector (no endless retries) and shows on the dashboard.
+      await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Needs review',?) ON CONFLICT(job_id) DO NOTHING").bind(crypto.randomUUID(),job.id,(ATTENTION_PREFIX+" Application handoff blocked: "+reasons.join("; ")).slice(0,1500)).run();
+      return response({error:"Application handoff blocked",reasons},409);
+    }
     const channel=routeApplication(job.url);
     if(channel.channel==="linkedin"||channel.channel==="indeed")return response({error:"Exact employer application URL must be verified first",channel},409);
     const existing=await env.DB.prepare("SELECT status FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
@@ -279,8 +322,11 @@ export async function personalApi(request, env, url, searchHandler) {
     if(existing)return response({ok:true,alreadyReceived:true,reviewRequired:true});
     await env.DB.prepare("INSERT INTO recruitment_application_receipts(id,job_id,queue_id,executor_status,confirmation_text,confirmation_url,employer_job_url) VALUES(?,?,?,?,?,?,?)").bind(body.id,job.id,queue.id,body.status,confirmation,confirmationUrl,body.jobUrl).run();
     await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Browser receipt received',?)").bind(crypto.randomUUID(),queue.id,"Receipt "+body.id+" pending verification").run();
+    if(body.status==="Submitted"){
+      await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='Submitted'").bind((ATTENTION_PREFIX+" Browser run reports the application was submitted. Employer confirmation: \""+confirmation+"\" at "+confirmationUrl+". Check for the employer's acknowledgement.").slice(0,1500),queue.id).run();
+    }
     if(body.status==="Needs review"||body.status==="Prepared"){
-      const reason=typeof body.reason==="string"?body.reason.slice(0,1500):"Browser application requires manual attention";
+      const reason=ATTENTION_PREFIX+" Application held by the browser run: "+(typeof body.reason==="string"?body.reason.slice(0,1450):"Browser application requires manual attention");
       await env.DB.prepare("UPDATE recruitment_application_queue SET status='Needs review',reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='Submitted'").bind(reason,queue.id).run();
     }
     return response({ok:true,receiptId:body.id,reviewRequired:true,submitted:false},202);
