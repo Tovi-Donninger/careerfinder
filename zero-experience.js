@@ -1,10 +1,89 @@
-// Fail-closed evidence gate for jobs requiring zero prior experience.
+// Fail-closed evidence gates for the experience requirement of a vacancy.
 // This is not a substitute for checking the original employer posting.
+//
+// Rule (see CAREERFINDER_RECRUITMENT_RULES.md):
+//  - hr_recruitment (or no roleCategory): zero experience, explicit evidence only.
+//  - admin_ops, sales, customer_success: zero experience OR at most 1 year required.
+export const ROLE_CATEGORIES=["hr_recruitment","admin_ops","sales","customer_success"];
+const EXPLICIT_ZERO=/\b(no (?:prior |previous |professional |relevant |work )?experience (?:is )?(?:required|necessary|needed)|no experience needed|no experience necessary|without (?:any |prior |previous )?experience|no previous work experience|no prior work experience|experience (?:is )?not required|previous experience (?:is )?not required|(?:zero|0) (?:years? of )?experience required)\b/i;
+
 export function zeroExperienceEvidence(job) {
   const evidence=String(job.zeroExperienceEvidence||"").trim();
   const url=String(job.zeroExperienceSourceUrl||"").trim();
   if(!evidence||!/^https:\/\//i.test(url))return false;
-  const explicit=/\b(no (?:prior |previous |professional |relevant |work )?experience (?:is )?(?:required|necessary|needed)|no experience needed|no experience necessary|without (?:any |prior |previous )?experience|no previous work experience|no prior work experience|experience (?:is )?not required|previous experience (?:is )?not required|(?:zero|0) (?:years? of )?experience required)\b/i.test(evidence);
+  const explicit=EXPLICIT_ZERO.test(evidence);
   const contradictory=/\b(?:[1-9]\d*\+?\s*(?:years?|yrs?)|minimum (?:of )?(?:one|two|three|four|five) years?)\b/i.test(evidence);
   return explicit&&!contradictory;
+}
+
+// Normalise a category: undefined/empty => null (treated as HR); unknown => false (rejected).
+export function normalizeRoleCategory(value) {
+  if(value===undefined||value===null||value==="")return null;
+  if(typeof value!=="string")return false;
+  const v=value.trim().toLowerCase();
+  return ROLE_CATEGORIES.includes(v)?v:false;
+}
+
+const NUM_WORDS={one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,eleven:11,twelve:12};
+const WORD_RE="one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve";
+const toNum=s=>{const x=String(s).toLowerCase();return x in NUM_WORDS?NUM_WORDS[x]:parseFloat(x)};
+
+// True when the text mentions any requirement above one year.
+function exceedsOneYear(text) {
+  for(const m of text.matchAll(new RegExp("\\b(\\d+(?:\\.\\d+)?|"+WORD_RE+")\\s*(?:\\+|plus)?\\s*(?:years?|yrs?)\\b","gi")))if(toNum(m[1])>1)return true;
+  if(/\b(?:several|multiple|many|few|couple of|numerous)\s+years?\b/i.test(text))return true;
+  for(const m of text.matchAll(new RegExp("\\b(\\d+(?:\\.\\d+)?|"+WORD_RE+")\\s*(?:\\+|plus)?\\s*months?\\b","gi")))if(toNum(m[1])>12)return true;
+  if(/\b(?:thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty)\S*\s+months?\b/i.test(text))return true;
+  if(/\b(?:more than|over|exceeding|in excess of)\s+(?:a|an|one|1)\s+(?:year|yr)\b/i.test(text))return true;
+  return false;
+}
+
+// True when the text explicitly states a requirement of at most one year.
+function statesAtMostOneYear(text) {
+  if(!/experience|exp\./i.test(text))return false;
+  return /\b(?:0|zero)\s*(?:\+\s*)?(?:-|–|—|to)\s*(?:1|one)\s*(?:years?|yrs?)\b/i.test(text)
+    ||/\b(?:at least|minimum(?: of)?|up to|under|less than|about|around|approximately|maximum(?: of)?|max(?:imum)? of)\s+(?:a|an|one|1)\s*(?:year|yr)s?\b/i.test(text)
+    ||/\b(?:1|one)\s*\+?\s*(?:years?|yrs?)\b/i.test(text)
+    ||new RegExp("\\b(?:\\d+|"+WORD_RE+")\\s*\\+?\\s*months?\\b","i").test(text);
+}
+
+// Role-aware gate. job: {zeroExperienceEvidence, zeroExperienceSourceUrl, roleCategory?}
+export function experienceEvidence(job) {
+  const category=normalizeRoleCategory(job.roleCategory);
+  if(category===false)return false;
+  if(category===null||category==="hr_recruitment")return zeroExperienceEvidence(job);
+  const evidence=String(job.zeroExperienceEvidence||"").trim();
+  const url=String(job.zeroExperienceSourceUrl||"").trim();
+  if(!evidence||!/^https:\/\//i.test(url))return false;
+  if(exceedsOneYear(evidence))return false;
+  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence);
+}
+
+// The evidence table has no category column, so non-HR categories are stored as a
+// "[role:<category>] " prefix on the evidence text (no schema change). HR stays unprefixed.
+export function encodeStoredEvidence(job) {
+  const evidence=String(job.zeroExperienceEvidence||"").trim().slice(0,1500);
+  const category=normalizeRoleCategory(job.roleCategory);
+  return category&&category!=="hr_recruitment"?"[role:"+category+"] "+evidence:evidence;
+}
+export function decodeStoredEvidence(stored) {
+  const m=/^\[role:(admin_ops|sales|customer_success)\] ([\s\S]*)$/.exec(String(stored||""));
+  return m?{roleCategory:m[1],evidence:m[2]}:{roleCategory:"hr_recruitment",evidence:String(stored||"")};
+}
+// Gate for a row of recruitment_zero_experience_evidence ({evidence,source_url} or aliased names).
+export function storedExperienceEvidence(row) {
+  if(!row)return false;
+  const d=decodeStoredEvidence(row.evidence??row.zeroExperienceEvidence);
+  return experienceEvidence({zeroExperienceEvidence:d.evidence,zeroExperienceSourceUrl:row.source_url??row.zeroExperienceSourceUrl,roleCategory:d.roleCategory});
+}
+
+// Page-level check used by the browser executor: only sentences that talk about experience count.
+export function pageExperienceOk(pageText, roleCategory) {
+  const category=normalizeRoleCategory(roleCategory);
+  if(category===false)return false;
+  const text=String(pageText||"");
+  if(category===null||category==="hr_recruitment")return EXPLICIT_ZERO.test(text);
+  const sentences=text.split(/(?<=[.!?\n])\s+|\n+/).filter(s=>/experience|years?|months?/i.test(s)).join(" . ");
+  if(exceedsOneYear(sentences))return false;
+  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences);
 }
