@@ -75,7 +75,18 @@ export async function personalApi(request, env, url, searchHandler) {
       discoveryAuthorized=diff===0;
     }
   }
-  if (!machineAuthorized && !discoveryAuthorized && !(await authorized(request, env.DB))) return response({error:"Please sign in."},401);
+  // Profile-read credential: may read the saved profile (GET only) and nothing else.
+  // It cannot edit the profile, save jobs, open application handoffs or record submissions.
+  let profileAuthorized=false;
+  if(method==="GET"&&path==="/api/private/profile"&&env.PROFILE_READ_KEY){
+    const supplied=request.headers.get("X-CareerFinder-Profile-Key")||"";
+    if(/^[a-f0-9]{64}$/.test(supplied)&&/^[a-f0-9]{64}$/.test(env.PROFILE_READ_KEY)){
+      const a=encoder.encode(supplied),b=encoder.encode(env.PROFILE_READ_KEY);
+      let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
+      profileAuthorized=diff===0;
+    }
+  }
+  if (!machineAuthorized && !discoveryAuthorized && !profileAuthorized && !(await authorized(request, env.DB))) return response({error:"Please sign in."},401);
   if (path === "/api/private/logout" && method === "POST") {
     await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(await sha256(tokenFrom(request))).run();
     return response({ok:true});

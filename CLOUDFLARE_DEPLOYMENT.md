@@ -18,3 +18,11 @@ The workflow is in `.github/workflows/deploy-cloudflare.yml` on the `feature/sec
 - The current GitHub Pages frontend has no server-side authentication barrier; protect private API data on the Worker side.
 - For later schema changes, add versioned migrations instead of editing migration 0001.
 - This is a preliminary deployment pipeline. Verify Cloudflare account permissions and Worker health after the first deployment.
+
+## Optional: read-only profile key for Grok Bot
+`PROFILE_READ_KEY` is a Worker secret that lets an automation read your saved profile (including CV text) and nothing else. Requests send it in the `X-CareerFinder-Profile-Key` header and it is accepted only on `GET /api/private/profile`. It cannot edit the profile, save or read job discoveries, open application handoffs, or record submissions; every other route still requires the dashboard login or its own dedicated key.
+
+1. Generate a key: `openssl rand -hex 32` (it must be exactly 64 lowercase hex characters, or the Worker rejects it).
+2. From the `careerfinder` folder, run `npx wrangler secret put PROFILE_READ_KEY` and paste the key when prompted. (Or Cloudflare dashboard → Workers & Pages → `careerfinder-search` → Settings → Variables and Secrets → add a **Secret**.) Do not put the key in a file, URL, chat or GitHub.
+3. Give the same key only to the automation that needs it, through its secret store.
+4. To revoke access, delete or replace the `PROFILE_READ_KEY` secret. Secrets take effect immediately, with no redeploy.
