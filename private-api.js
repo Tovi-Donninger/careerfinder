@@ -64,7 +64,18 @@ export async function personalApi(request, env, url, searchHandler) {
       machineAuthorized=diff===0;
     }
   }
-  if (!machineAuthorized && !(await authorized(request, env.DB))) return response({error:"Please sign in."},401);
+  // Discovery-only credential: may save/read Job discoveries and nothing else.
+  const discoveryPaths=new Set(["POST /api/private/recruitment/jobs","GET /api/private/recruitment/jobs"]);
+  let discoveryAuthorized=false;
+  if(discoveryPaths.has(method+" "+path)&&env.DISCOVERY_WRITE_KEY){
+    const supplied=request.headers.get("X-CareerFinder-Discovery-Key")||"";
+    if(/^[a-f0-9]{64}$/.test(supplied)&&/^[a-f0-9]{64}$/.test(env.DISCOVERY_WRITE_KEY)){
+      const a=encoder.encode(supplied),b=encoder.encode(env.DISCOVERY_WRITE_KEY);
+      let diff=0;for(let i=0;i<a.length;i++)diff|=a[i]^b[i];
+      discoveryAuthorized=diff===0;
+    }
+  }
+  if (!machineAuthorized && !discoveryAuthorized && !(await authorized(request, env.DB))) return response({error:"Please sign in."},401);
   if (path === "/api/private/logout" && method === "POST") {
     await env.DB.prepare("DELETE FROM auth_sessions WHERE token_hash = ?").bind(await sha256(tokenFrom(request))).run();
     return response({ok:true});
