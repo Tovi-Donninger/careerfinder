@@ -56,6 +56,18 @@ export function externalApplicationInput(body){
   const cv=typeof body.cv==="string"?body.cv.replace(/[\r\n]+/g," ").trim().slice(0,150):"";
   return {url:"https://www.linkedin.com/jobs/view/"+m[1],linkedinJobId:m[1],confirmation,provider,appliedAt,cv};
 }
+// Tovi's own tracking of a reviewed job: "Applied" (he applied himself) or "Rejected" (employer
+// rejected him, or he dismissed it). "Reset" undoes the latest change. Stored in the application
+// queue with provider MANUAL_PROVIDER so it is distinct from AI-confirmed "Submitted".
+export const MANUAL_PROVIDER="tovi-manual";
+export const MANUAL_STATUSES=["Applied","Rejected"];
+export function jobStatusInput(body){
+  if(!body||typeof body!=="object")return {error:"Invalid body"};
+  if(typeof body.jobId!=="string"||!body.jobId||body.jobId.length>100)return {error:"jobId required"};
+  if(![...MANUAL_STATUSES,"Reset"].includes(body.status))return {error:"status must be Applied, Rejected or Reset"};
+  const note=typeof body.note==="string"?body.note.replace(/\s+/g," ").trim().slice(0,300):"";
+  return {jobId:body.jobId,status:body.status,note};
+}
 export const ATTENTION_PREFIX = "NEEDS TOVI:";
 export function needsAttention(job) {
   return /needs[_ ]review/i.test(String(job?.verification||job?.verificationStatus||job?.verification_status||""))||String(job?.reason??job?.matchReason??job?.match_reason??"").trim().toUpperCase().startsWith(ATTENTION_PREFIX);
@@ -195,8 +207,52 @@ export async function personalApi(request, env, url, searchHandler) {
     return response({ok:true,found:jobs.length,stored,skipped,reviewStored,reviewAlreadyStored,reviewQueued,reviewAlreadyQueued,reviewLocationExcluded,reviewCandidates:(data.reviewCandidates||[]).slice(0,10),diagnostics:data.diagnostics||{},sourceDiagnostics:data.sourceDiagnostics||[],errors:data.errors||[],automaticSubmission:false,verificationRequired:true});
   }
   if (path === "/api/private/recruitment/jobs" && method === "GET") {
-    const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url,q.status AS queue_status,q.provider AS queue_provider,q.external_reference AS queue_external_reference FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url LEFT JOIN recruitment_application_queue q ON q.job_id=j.id ORDER BY j.discovered_at DESC LIMIT 500").all();
+    const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url,q.status AS queue_status,q.provider AS queue_provider,q.external_reference AS queue_external_reference,q.updated_at AS queue_updated_at FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url LEFT JOIN recruitment_application_queue q ON q.job_id=j.id ORDER BY j.discovered_at DESC LIMIT 500").all();
     return response({jobs:(rows.results||[]).map(r=>{const d=decodeStoredEvidence(r.zero_experience_evidence);return {...r,zero_experience_evidence:d.evidence,role_category:d.roleCategory}})});
+  }
+  if (path === "/api/private/recruitment/job-status" && method === "POST") {
+    // Owner session only (none of the machine, discovery or profile keys reach this route).
+    const raw=await request.text();if(raw.length>2000)return response({error:"Payload too large"},413);
+    let body;try{body=JSON.parse(raw)}catch{return response({error:"Invalid JSON"},400)}
+    const v=jobStatusInput(body);
+    if(v.error)return response({error:v.error},400);
+    const job=await env.DB.prepare("SELECT id,title,company,pipeline FROM recruitment_jobs WHERE id=?").bind(v.jobId).first();
+    if(!job)return response({error:"Job not found"},404);
+    const q=await env.DB.prepare("SELECT * FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
+    if(v.status==="Reset"){
+      if(!q||!MANUAL_STATUSES.includes(q.status))return response({error:"Nothing to undo for this job"},409);
+      const last=await env.DB.prepare("SELECT id,details FROM recruitment_application_events WHERE queue_id=? AND event_type='Manual status set' ORDER BY rowid DESC LIMIT 1").bind(q.id).first();
+      let prior;try{prior=JSON.parse(last?.details||"null")?.from}catch{prior=undefined}
+      if(!last||prior===undefined)return response({error:"No earlier state to return to"},409);
+      const markUndone=env.DB.prepare("UPDATE recruitment_application_events SET event_type='Manual status set (undone)' WHERE id=?").bind(last.id);
+      if(prior===null){
+        // The job had no queue row before: remove it so the job returns to its earlier, un-queued state.
+        const others=await env.DB.prepare("SELECT (SELECT COUNT(*) FROM recruitment_application_events WHERE queue_id=? AND event_type NOT LIKE 'Manual status set%') AS e,(SELECT COUNT(*) FROM recruitment_application_receipts WHERE queue_id=?) AS r").bind(q.id,q.id).first();
+        if(!others.e&&!others.r){
+          await env.DB.batch([env.DB.prepare("DELETE FROM recruitment_application_events WHERE queue_id=?").bind(q.id),env.DB.prepare("DELETE FROM recruitment_application_queue WHERE id=?").bind(q.id),env.DB.prepare("UPDATE recruitment_jobs SET pipeline=? WHERE id=?").bind(job.pipeline&&!MANUAL_STATUSES.includes(job.pipeline)?job.pipeline:"Discovered",job.id)]);
+          return response({ok:true,jobId:job.id,status:null,provider:null,manual:false,restored:true});
+        }
+        await env.DB.batch([markUndone,env.DB.prepare("UPDATE recruitment_application_queue SET status='Needs review',provider='grok-hold',reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(ATTENTION_PREFIX+" status was reset by Tovi; review this job again",q.id),env.DB.prepare("UPDATE recruitment_jobs SET pipeline='Discovered' WHERE id=?").bind(job.id)]);
+        return response({ok:true,jobId:job.id,status:"Needs review",provider:"grok-hold",manual:false,restored:true});
+      }
+      await env.DB.batch([markUndone,env.DB.prepare("UPDATE recruitment_application_queue SET status=?,provider=?,reason=?,external_reference=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(prior.status,prior.provider||"",prior.reason||"",prior.external_reference||"",q.id),env.DB.prepare("UPDATE recruitment_jobs SET pipeline=? WHERE id=?").bind(prior.pipeline||"Discovered",job.id)]);
+      return response({ok:true,jobId:job.id,status:prior.status,provider:prior.provider||"",manual:prior.provider===MANUAL_PROVIDER,restored:true});
+    }
+    const confirmedRef=!!q&&String(q.external_reference||"").trim().length>0;
+    // An AI-confirmed submission is never relabelled as a manual "Applied".
+    if(v.status==="Applied"&&confirmedRef)return response(q.status==="Submitted"?{ok:true,jobId:job.id,status:"Submitted",provider:q.provider,manual:false,unchanged:true}:{error:"This job was submitted with confirmation earlier. Use Undo to return it to Submitted."},q.status==="Submitted"?200:409);
+    if(q&&q.status===v.status)return response({ok:true,jobId:job.id,status:q.status,provider:q.provider,manual:q.provider===MANUAL_PROVIDER,unchanged:true});
+    const from=q?{status:q.status,provider:q.provider,reason:q.reason,external_reference:q.external_reference,pipeline:job.pipeline}:null;
+    const queueId=q?.id||crypto.randomUUID();
+    const provider=confirmedRef?q.provider:MANUAL_PROVIDER;
+    const label=v.status==="Applied"?"Applied by Tovi":"Rejected / dismissed by Tovi";
+    const reason=q&&q.reason?q.reason:label;
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason,provider,external_reference) VALUES(?,?,?,?,?,'') ON CONFLICT(job_id) DO UPDATE SET status=excluded.status,provider=?,updated_at=CURRENT_TIMESTAMP").bind(queueId,job.id,v.status,reason,provider,provider),
+      env.DB.prepare("UPDATE recruitment_jobs SET pipeline=? WHERE id=?").bind(v.status,job.id),
+      env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Manual status set',?)").bind(crypto.randomUUID(),queueId,JSON.stringify({to:v.status,note:v.note,from}).slice(0,5000))
+    ]);
+    return response({ok:true,jobId:job.id,title:job.title,company:job.company,status:v.status,provider,manual:provider===MANUAL_PROVIDER});
   }
   if (path === "/api/private/recruitment/external-application" && method === "POST") {
     // Record an application that was already submitted outside CareerFinder (LinkedIn Easy Apply
@@ -210,6 +266,7 @@ export async function personalApi(request, env, url, searchHandler) {
     if(!job)return response({error:"Save the job as a discovery before recording its application"},404);
     const existing=await env.DB.prepare("SELECT id,status,provider,external_reference FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     if(existing?.status==="Submitted")return response({ok:true,alreadySubmitted:true,status:"Submitted",provider:existing.provider,externalReference:existing.external_reference});
+    if(existing&&MANUAL_STATUSES.includes(existing.status))return response({ok:true,alreadyTracked:true,status:existing.status,provider:existing.provider});
     const reference=("linkedin:"+v.linkedinJobId+" "+v.confirmation).slice(0,1000);
     const reason=("APPLIED via LinkedIn"+(v.appliedAt?" "+v.appliedAt:"")+" ("+v.provider+"). Confirmation: \""+v.confirmation+"\""+(v.cv?". CV: "+v.cv:"")).slice(0,1500);
     const queueId=existing?.id||crypto.randomUUID();
@@ -343,6 +400,7 @@ export async function personalApi(request, env, url, searchHandler) {
     if(channel.channel==="linkedin"||channel.channel==="indeed")return response({error:"Exact employer application URL must be verified first",channel},409);
     const existing=await env.DB.prepare("SELECT status FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     if(existing?.status==="Submitted")return response({error:"Already submitted; duplicate blocked"},409);
+    if(existing&&MANUAL_STATUSES.includes(existing.status))return response({error:"Already marked "+existing.status+" by Tovi; not applying again"},409);
     await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason) VALUES(?,?,'Needs review',?) ON CONFLICT(job_id) DO NOTHING").bind(crypto.randomUUID(),job.id,"Application handoff started; awaiting browser outcome").run();
     return response({jobId:job.id,job:{url:job.url,title:job.title,company:job.company},profile,verifiedZeroExperience:true,verifiedEnglish:true,verifiedIsraelEligibility:true,confirmedOpen:true,sourceEvidence:{roleCategory:decodeStoredEvidence(evidence.evidence).roleCategory,zeroExperience:decodeStoredEvidence(evidence.evidence).evidence,sourceUrl:evidence.source_url,language:job.language_evidence,eligibility:job.eligibility_evidence,open:job.verification_status},note:"Private, authenticated handoff. Browser executor must independently check the employer page. No submission occurred."});
   }
@@ -357,6 +415,7 @@ export async function personalApi(request, env, url, searchHandler) {
     const queue=await env.DB.prepare("SELECT * FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     if(!queue)return response({error:"Queue job before uploading receipt"},409);
     if(queue.status==="Submitted")return response({error:"Already submitted; duplicate receipt rejected"},409);
+    if(MANUAL_STATUSES.includes(queue.status))return response({error:"Already marked "+queue.status+" by Tovi; receipt not applied"},409);
     const confirmation=typeof body.confirmation==="string"?body.confirmation.slice(0,1000):"";
     const confirmationUrl=typeof body.confirmationPage==="string"?body.confirmationPage.slice(0,1000):"";
     if(body.status==="Submitted"&&(!confirmation||!/^https:\/\//.test(confirmationUrl)))return response({error:"Submitted receipt requires employer confirmation text and HTTPS confirmation page"},400);
@@ -398,6 +457,8 @@ export async function personalApi(request, env, url, searchHandler) {
     const policy=await env.DB.prepare("SELECT * FROM recruitment_application_policy WHERE id=1").first();
     const row=await env.DB.prepare("SELECT profile_json FROM personal_profile WHERE id=1").first();
     let profile=null;try{profile=row?JSON.parse(row.profile_json):null}catch{}
+    const tracked=await env.DB.prepare("SELECT status FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
+    if(tracked&&MANUAL_STATUSES.includes(tracked.status))return response({submitted:false,status:tracked.status,reason:"Already marked "+tracked.status+" by Tovi"},409);
     const assessment=await assessApplication(job,evidence,profile,policy);
     const executor=assessment.eligible?await executeApplication():{submitted:false,status:"Blocked",reason:assessment.reasons.join("; ")};
     // Never persist 'Submitted' without a verified external reference.
@@ -410,7 +471,7 @@ export async function personalApi(request, env, url, searchHandler) {
   if (path === "/api/private/recruitment/submitted-applications" && method === "GET") {
     // Only application executor records with an external confirmation may appear here.
     // Manual entries and unsubmitted queue items are intentionally excluded.
-    const rows=await env.DB.prepare("SELECT q.id,q.job_id,q.provider,q.external_reference,q.updated_at AS submitted_at,j.title,j.company,j.location,j.url FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status='Submitted' AND length(trim(q.external_reference))>0 ORDER BY q.updated_at DESC LIMIT 500").all();
+    const rows=await env.DB.prepare("SELECT q.id,q.job_id,q.provider,q.external_reference,q.updated_at AS submitted_at,q.status,j.title,j.company,j.location,j.url FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status IN ('Submitted','Rejected') AND length(trim(q.external_reference))>0 ORDER BY q.updated_at DESC LIMIT 500").all();
     return response({applications:rows.results||[],verifiedOnly:true});
   }
   if (path === "/api/private/recruitment/application-policy" && method === "GET") {
