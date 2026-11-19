@@ -34,9 +34,9 @@ function render(){
     tbody.appendChild(tr);
   }
   const count=s=>allJobs.filter(j=>T.state(j.queue_status,j.queue_provider)===s).length;
-  setTile("saved-applied",count("applied"));setTile("saved-rejected",count("rejected"));setTile("saved-open",count("open"));
+  setTile("saved-open",count("open"));
   const flaggedAll=allJobs.filter(attention).length;
-  status.textContent=(flaggedAll?flaggedAll+" need your attention · ":"")+"Showing "+jobs.length+" of "+allJobs.length+" saved job discoveries · "+count("applied")+" applied by you · "+count("rejected")+" rejected · "+count("submitted")+" submitted by AI with confirmation. Use “I applied” or “Rejected” on a job to track it; Undo reverses it.";
+  status.textContent=(flaggedAll?flaggedAll+" need your attention · ":"")+"Showing "+jobs.length+" of "+allJobs.length+" saved job discoveries"+(chosen==="open"?" (jobs you marked Applied or Rejected are moved to their own lists below)":"")+" · "+count("submitted")+" submitted by AI with confirmation.";
 }
 async function refresh(){
   status.textContent="Loading saved recruitment findings…";

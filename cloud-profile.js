@@ -58,11 +58,12 @@
   window.careerfinderApplicationQueue=()=>{requireLogin();return call("/api/private/recruitment/application-queue")};
   window.careerfinderConfirmedSubmissions=()=>{requireLogin();return call("/api/private/recruitment/submitted-applications")};
   window.careerfinderRecruitmentJobs=()=>{requireLogin();return call("/api/private/recruitment/jobs")};
+  window.careerfinderTrackedJobs=()=>{requireLogin();return call("/api/private/recruitment/tracked-jobs")};
   window.careerfinderSetJobStatus=(jobId,status,note)=>{requireLogin();return call("/api/private/recruitment/job-status","POST",{jobId,status,note})};
   window.careerfinderSaveJobs=jobs=>{requireLogin();return call("/api/private/recruitment/jobs","POST",{jobs})};
   window.careerfinderMatchedSearch=()=>{requireLogin();return call("/api/private/matched-search","POST",{})};
   function refresh(){
-    for(const name of ["careerfinderRefreshRecruitment","careerfinderRefreshConfirmedSubmissions","careerfinderRefreshApplicationQueue"]){
+    for(const name of ["careerfinderRefreshRecruitment","careerfinderRefreshConfirmedSubmissions","careerfinderRefreshApplicationQueue","careerfinderRefreshTracked"]){
       if(typeof window[name]==="function")window[name]();
     }
   }

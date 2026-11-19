@@ -48,7 +48,7 @@ function render(){
   }
   const flaggedAll=allItems.filter(attention).length;
   const n=s=>allItems.filter(i=>tracked(i)===s).length;
-  status.textContent="Showing "+items.length+" of "+allItems.length+" · "+(flaggedAll?flaggedAll+" need your attention · ":"")+counts.suitable+" AI suitable · "+counts.unsuitable+" AI unsuitable · "+counts.needs_review+" AI needs review · "+counts.unassessed+" not yet AI assessed · "+n("applied")+" applied by you · "+n("rejected")+" rejected. Held and blocked items are never submitted automatically; jobs you mark Applied or Rejected are never applied to again.";
+  status.textContent="Showing "+items.length+" of "+allItems.length+" · "+(flaggedAll?flaggedAll+" need your attention · ":"")+counts.suitable+" AI suitable · "+counts.unsuitable+" AI unsuitable · "+counts.needs_review+" AI needs review · "+counts.unassessed+" not yet AI assessed · "+(n("applied")+n("rejected"))+" marked Applied/Rejected by you (shown in their own lists below, hidden here by default). Held and blocked items are never submitted automatically; jobs you mark Applied or Rejected are never applied to again.";
 }
 async function refresh(){
   status.textContent="Loading AI-reviewed application queue…";
