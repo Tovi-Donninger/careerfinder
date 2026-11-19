@@ -121,3 +121,15 @@ test("a LinkedIn confirmation for a job Tovi already marked Applied or Rejected 
   const res=await (await dk("POST","/api/private/recruitment/external-application",{url:LI,confirmation:"Application submitted"})).json();
   assert.equal(res.alreadyTracked,true);assert.equal(row().status,"Rejected");assert.equal(row().external_reference,"");
 });
+test("tracked-jobs list: only Applied/Rejected, owner session only, leaves the list on Undo",async()=>{
+  const {id,set,owner,call,mk,dk}=await setup();
+  const list=async()=>(await (await owner("GET","/api/private/recruitment/tracked-jobs")).json());
+  assert.deepEqual((await list()).jobs,[]);
+  await set("Applied",{note:"x"});
+  let out=await list();
+  assert.equal(out.applied,1);assert.equal(out.rejected,0);
+  assert.equal(out.jobs[0].id,id);assert.equal(out.jobs[0].status,"Applied");assert.equal(out.jobs[0].title,ready.title);assert.equal(out.jobs[0].url,ready.url);assert.match(out.jobs[0].marked_at,/^\d{4}-\d\d-\d\d/);assert.equal(out.jobs[0].was_submitted,false);
+  await set("Rejected");out=await list();assert.equal(out.applied,0);assert.equal(out.rejected,1);
+  await set("Reset");await set("Reset");assert.deepEqual((await list()).jobs,[]);
+  for(const f of [()=>call("GET","/api/private/recruitment/tracked-jobs"),()=>dk("GET","/api/private/recruitment/tracked-jobs"),()=>mk("GET","/api/private/recruitment/tracked-jobs")])assert.equal((await f()).status,401);
+});

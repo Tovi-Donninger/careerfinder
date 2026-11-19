@@ -210,6 +210,12 @@ export async function personalApi(request, env, url, searchHandler) {
     const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url,q.status AS queue_status,q.provider AS queue_provider,q.external_reference AS queue_external_reference,q.updated_at AS queue_updated_at FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url LEFT JOIN recruitment_application_queue q ON q.job_id=j.id ORDER BY j.discovered_at DESC LIMIT 500").all();
     return response({jobs:(rows.results||[]).map(r=>{const d=decodeStoredEvidence(r.zero_experience_evidence);return {...r,zero_experience_evidence:d.evidence,role_category:d.roleCategory}})});
   }
+  if (path === "/api/private/recruitment/tracked-jobs" && method === "GET") {
+    // Jobs Tovi has marked Applied or Rejected, newest first (owner session only).
+    const rows=await env.DB.prepare("SELECT q.job_id AS id,q.status,q.provider,q.updated_at AS marked_at,(length(trim(q.external_reference))>0) AS was_submitted,j.title,j.company,j.location,j.url FROM recruitment_application_queue q JOIN recruitment_jobs j ON j.id=q.job_id WHERE q.status IN ('Applied','Rejected') ORDER BY q.updated_at DESC,q.rowid DESC LIMIT 500").all();
+    const jobs=(rows.results||[]).map(r=>({...r,was_submitted:!!r.was_submitted}));
+    return response({jobs,applied:jobs.filter(j=>j.status==="Applied").length,rejected:jobs.filter(j=>j.status==="Rejected").length});
+  }
   if (path === "/api/private/recruitment/job-status" && method === "POST") {
     // Owner session only (none of the machine, discovery or profile keys reach this route).
     const raw=await request.text();if(raw.length>2000)return response({error:"Payload too large"},413);
