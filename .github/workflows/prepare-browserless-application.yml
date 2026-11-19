@@ -1,7 +1,11 @@
 name: CareerFinder Browserless application (prepare or verified auto-submit)
 on:
+  # GitHub delays or drops busy top-of-the-hour schedules, so run off-peak twice an hour.
+  # repository_dispatch (type careerfinder-apply) lets an external scheduler start a run on demand.
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "7,37 * * * *"
+  repository_dispatch:
+    types: [careerfinder-apply]
   workflow_dispatch:
     inputs:
       job_id:
@@ -21,25 +25,31 @@ concurrency:
 jobs:
   prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
+    env:
+      REQUESTED_JOB_ID: ${{ inputs.job_id || github.event.client_payload.job_id || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Test employer vacancy verification
-        run: node --test scripts/vacancy-verification.test.mjs
+      - name: Test employer vacancy verification, form adapters and screening answers
+        run: node --test scripts/vacancy-verification.test.mjs scripts/form-adapters.test.mjs scripts/screening-answers.test.mjs scripts/form-helpers.test.mjs
+      - name: Report auto-submit switch (repository variable, not a secret)
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "CAREERFINDER_ENABLE_AUTO_SUBMIT is true: ${{ vars.CAREERFINDER_ENABLE_AUTO_SUBMIT == 'true' }}"
       - name: Check discovery credential
         env:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
         run: test -n "$CAREERFINDER_AUTOMATION_KEY" || { echo "::error::Missing CAREERFINDER_AUTOMATION_KEY"; exit 1; }
       - name: Discover new vacancies from public feeds
-        if: inputs.job_id == ''
+        if: env.REQUESTED_JOB_ID == ''
         env:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
         run: node scripts/discover-vacancies.mjs
       - name: AI review employer vacancy pages against saved CV
-        if: inputs.job_id == ''
+        if: env.REQUESTED_JOB_ID == ''
         env:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
         run: node scripts/verify-queued-vacancies.mjs
@@ -47,9 +57,10 @@ jobs:
         id: select
         env:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
-          INPUT_JOB_ID: ${{ inputs.job_id }}
+          INPUT_JOB_ID: ${{ env.REQUESTED_JOB_ID }}
         run: |
           if [[ -n "$INPUT_JOB_ID" ]]; then
+            [[ "$INPUT_JOB_ID" =~ ^[a-zA-Z0-9_-]{1,100}$ ]] || { echo "::error::Invalid job ID"; exit 1; }
             echo "job_id=$INPUT_JOB_ID" >> "$GITHUB_OUTPUT"
           else
             node scripts/select-next-application.mjs
@@ -74,7 +85,7 @@ jobs:
           CAREERFINDER_AUTOMATION_KEY: ${{ secrets.CAREERFINDER_AUTOMATION_KEY }}
           CAREERFINDER_CV_BASE64: ${{ secrets.CAREERFINDER_CV_BASE64 }}
           JOB_ID: ${{ steps.select.outputs.job_id }}
-          AUTO_SUBMIT: ${{ vars.CAREERFINDER_ENABLE_AUTO_SUBMIT == 'true' && (github.event_name == 'schedule' || inputs.auto_submit == true) }}
+          AUTO_SUBMIT: ${{ vars.CAREERFINDER_ENABLE_AUTO_SUBMIT == 'true' && (github.event_name == 'schedule' || inputs.auto_submit == true || (github.event_name == 'repository_dispatch' && github.event.client_payload.auto_submit != false)) }}
           CAREERFINDER_BROWSER_MONTHLY_UNIT_CAP: '900'
           CAREERFINDER_BROWSER_RESERVE_UNITS: '4'
         shell: bash
