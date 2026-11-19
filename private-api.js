@@ -43,6 +43,19 @@ export function confirmationOnEmployerSite(confirmationUrl,jobUrl){
 }
 const statuses = ["Discovered","Prepared","Submitted","Interview","Rejected","Blocked"];
 // Items Tovi must look at are marked with this prefix (Grok Bot notes, browser holds, blocked handoffs).
+// Validation for /api/private/recruitment/external-application (discovery key).
+export function externalApplicationInput(body){
+  if(!body||typeof body!=="object")return {error:"Invalid body"};
+  const m=/^https:\/\/(?:www\.)?linkedin\.com\/jobs\/view\/(\d{5,15})\/?$/.exec(typeof body.url==="string"?body.url.trim():"");
+  if(!m)return {error:"url must be https://www.linkedin.com/jobs/view/<id>"};
+  const confirmation=typeof body.confirmation==="string"?body.confirmation.replace(/\s+/g," ").trim().slice(0,300):"";
+  if(!confirmation)return {error:"confirmation text is required"};
+  const provider=body.provider===undefined?"linkedin-easy-apply":body.provider;
+  if(!["linkedin-easy-apply","manual"].includes(provider))return {error:"provider must be linkedin-easy-apply or manual"};
+  const appliedAt=typeof body.appliedAt==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(body.appliedAt)?body.appliedAt:"";
+  const cv=typeof body.cv==="string"?body.cv.replace(/[\r\n]+/g," ").trim().slice(0,150):"";
+  return {url:"https://www.linkedin.com/jobs/view/"+m[1],linkedinJobId:m[1],confirmation,provider,appliedAt,cv};
+}
 export const ATTENTION_PREFIX = "NEEDS TOVI:";
 export function needsAttention(job) {
   return /needs[_ ]review/i.test(String(job?.verification||job?.verificationStatus||job?.verification_status||""))||String(job?.reason??job?.matchReason??job?.match_reason??"").trim().toUpperCase().startsWith(ATTENTION_PREFIX);
@@ -93,7 +106,7 @@ export async function personalApi(request, env, url, searchHandler) {
     }
   }
   // Discovery-only credential: may save/read Job discoveries and nothing else.
-  const discoveryPaths=new Set(["POST /api/private/recruitment/jobs","GET /api/private/recruitment/jobs"]);
+  const discoveryPaths=new Set(["POST /api/private/recruitment/jobs","GET /api/private/recruitment/jobs","POST /api/private/recruitment/external-application"]);
   let discoveryAuthorized=false;
   if(discoveryPaths.has(method+" "+path)&&env.DISCOVERY_WRITE_KEY){
     const supplied=request.headers.get("X-CareerFinder-Discovery-Key")||"";
@@ -182,8 +195,28 @@ export async function personalApi(request, env, url, searchHandler) {
     return response({ok:true,found:jobs.length,stored,skipped,reviewStored,reviewAlreadyStored,reviewQueued,reviewAlreadyQueued,reviewLocationExcluded,reviewCandidates:(data.reviewCandidates||[]).slice(0,10),diagnostics:data.diagnostics||{},sourceDiagnostics:data.sourceDiagnostics||[],errors:data.errors||[],automaticSubmission:false,verificationRequired:true});
   }
   if (path === "/api/private/recruitment/jobs" && method === "GET") {
-    const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url ORDER BY j.discovered_at DESC LIMIT 500").all();
+    const rows=await env.DB.prepare("SELECT j.*,z.evidence AS zero_experience_evidence,z.source_url AS zero_experience_source_url,q.status AS queue_status,q.provider AS queue_provider,q.external_reference AS queue_external_reference FROM recruitment_jobs j JOIN recruitment_zero_experience_evidence z ON z.job_url=j.url LEFT JOIN recruitment_application_queue q ON q.job_id=j.id ORDER BY j.discovered_at DESC LIMIT 500").all();
     return response({jobs:(rows.results||[]).map(r=>{const d=decodeStoredEvidence(r.zero_experience_evidence);return {...r,zero_experience_evidence:d.evidence,role_category:d.roleCategory}})});
+  }
+  if (path === "/api/private/recruitment/external-application" && method === "POST") {
+    // Record an application that was already submitted outside CareerFinder (LinkedIn Easy Apply
+    // by Grok Bot, or by Tovi himself) for an EXISTING discovery job. Only LinkedIn job-view URLs
+    // with the platform's confirmation text are accepted; the only change is status -> Submitted.
+    const raw=await request.text();if(raw.length>4000)return response({error:"Payload too large"},413);
+    let body;try{body=JSON.parse(raw)}catch{return response({error:"Invalid JSON"},400)}
+    const v=externalApplicationInput(body);
+    if(v.error)return response({error:v.error},400);
+    const job=await env.DB.prepare("SELECT id,url,title,company FROM recruitment_jobs WHERE url=?").bind(v.url).first();
+    if(!job)return response({error:"Save the job as a discovery before recording its application"},404);
+    const existing=await env.DB.prepare("SELECT id,status,provider,external_reference FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
+    if(existing?.status==="Submitted")return response({ok:true,alreadySubmitted:true,status:"Submitted",provider:existing.provider,externalReference:existing.external_reference});
+    const reference=("linkedin:"+v.linkedinJobId+" "+v.confirmation).slice(0,1000);
+    const reason=("APPLIED via LinkedIn"+(v.appliedAt?" "+v.appliedAt:"")+" ("+v.provider+"). Confirmation: \""+v.confirmation+"\""+(v.cv?". CV: "+v.cv:"")).slice(0,1500);
+    const queueId=existing?.id||crypto.randomUUID();
+    await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason,provider,external_reference) VALUES(?,?,'Submitted',?,?,?) ON CONFLICT(job_id) DO UPDATE SET status='Submitted',reason=excluded.reason,provider=excluded.provider,external_reference=excluded.external_reference,updated_at=CURRENT_TIMESTAMP WHERE recruitment_application_queue.status!='Submitted'").bind(queueId,job.id,reason,v.provider,reference).run();
+    await env.DB.prepare("UPDATE recruitment_jobs SET pipeline='Submitted' WHERE id=?").bind(job.id).run();
+    await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'External application recorded',?)").bind(crypto.randomUUID(),queueId,reference).run();
+    return response({ok:true,jobId:job.id,title:job.title,company:job.company,status:"Submitted",provider:v.provider,externalReference:reference});
   }
   if (path === "/api/private/recruitment/jobs" && method === "POST") {
     const raw=await request.text();
