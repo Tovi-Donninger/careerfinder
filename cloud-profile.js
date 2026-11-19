@@ -63,7 +63,7 @@
   window.careerfinderSaveJobs=jobs=>{requireLogin();return call("/api/private/recruitment/jobs","POST",{jobs})};
   window.careerfinderMatchedSearch=()=>{requireLogin();return call("/api/private/matched-search","POST",{})};
   function refresh(){
-    for(const name of ["careerfinderRefreshRecruitment","careerfinderRefreshConfirmedSubmissions","careerfinderRefreshApplicationQueue","careerfinderRefreshTracked"]){
+    for(const name of ["careerfinderRefreshRecruitment","careerfinderRefreshApplicationQueue","careerfinderRefreshTracked"]){
       if(typeof window[name]==="function")window[name]();
     }
   }

@@ -1,35 +1,92 @@
-// "Applied (by you)" and "Rejected" lists: jobs Tovi has marked, saved by the Worker. Undo moves a job back to the review lists.
 (()=>{
-const byId=id=>document.getElementById(id);
-const T=window.careerfinderTracking;
-const lists=[["Applied","applied-records","applied-status","applied-refresh","Nothing marked as applied yet. Press “I applied” on a job above after you have applied."],["Rejected","rejected-records","rejected-status","rejected-refresh","Nothing marked as rejected yet."]];
-if(!byId("applied-records")||!T)return;
-const cell=(row,text)=>{const td=document.createElement("td");td.textContent=text??"";row.appendChild(td);return td};
-const when=v=>{const d=new Date(String(v||"").replace(" ","T")+"Z");return isNaN(d)?String(v||""):d.toLocaleString([], {dateStyle:"medium",timeStyle:"short"})};
-const setTile=(id,n)=>{const el=byId(id);if(el)el.textContent=n};
-function fill(name,tbody,status,jobs,empty){
-  tbody.replaceChildren();
-  for(const job of jobs){
-    const tr=document.createElement("tr");
-    const head=cell(tr,"");const strong=document.createElement("strong");strong.textContent=job.title+" — "+job.company;head.append(strong);
-    if(job.was_submitted){const n=document.createElement("div");n.className="ai-summary";n.textContent="This had been submitted by AI with employer confirmation.";head.append(n)}
-    cell(tr,job.location||"Not stated");
-    cell(tr,when(job.marked_at));
-    const link=cell(tr,"");if(/^https:\/\//.test(job.url||"")){const a=document.createElement("a");a.href=job.url;a.target="_blank";a.rel="noopener noreferrer";a.textContent="View vacancy";link.append(a)}
-    T.control(cell(tr,""),job.id,T.state(job.status));
-    tbody.append(tr);
+  const byId=id=>document.getElementById(id);
+  const applied=byId("submitted-records"),rejected=byId("rejected-records");
+  const T=window.careerfinderTracking;
+  if(!applied||!rejected||!T)return;
+  const appliedStatus=byId("submitted-status"),rejectedStatus=byId("rejected-status");
+
+  function cell(row,value=""){
+    const td=document.createElement("td");
+    td.textContent=value;
+    row.append(td);
+    return td;
   }
-  status.textContent=jobs.length?jobs.length+" job"+(jobs.length===1?"":"s")+" marked "+name.toLowerCase()+". Undo moves a job back to the review lists.":empty;
-}
-async function refresh(){
-  for(const [,tb,st] of lists)byId(st).textContent="Loading…";
-  try{
-    const data=await window.careerfinderTrackedJobs();const jobs=data.jobs||[];
-    for(const [name,tb,st,,empty] of lists)fill(name,byId(tb),byId(st),jobs.filter(j=>j.status===name),empty);
-    setTile("saved-applied",data.applied??0);setTile("saved-rejected",data.rejected??0);
-  }catch(e){for(const [,tb,st] of lists){byId(tb).replaceChildren();byId(st).textContent="Could not load: "+e.message}}
-}
-for(const [,,,btn] of lists)byId(btn).addEventListener("click",refresh);
-window.careerfinderRefreshTracked=refresh;
-if(byId("cloud-session-panel")&&!byId("cloud-session-panel").hidden)refresh();
+
+  function dateLabel(value){
+    if(!value)return "";
+    const iso=value.replace(" ","T");
+    const date=new Date(/[zZ]|[+-]\d\d:\d\d$/.test(iso)?iso:iso+"Z");
+    return Number.isNaN(date.getTime())?value:date.toLocaleString([], {dateStyle:"medium",timeStyle:"short"});
+  }
+
+  function renderRows(body,jobs,isApplied){
+    body.replaceChildren();
+    for(const job of jobs){
+      const row=document.createElement("tr");
+      const name=document.createElement("strong");
+      name.textContent=[job.title,job.company].filter(Boolean).join(" — ");
+      cell(row).append(name);
+      if(!isApplied&&job.was_submitted){
+        const note=document.createElement("div");
+        note.className="ai-summary";
+        note.textContent="Previously submitted with external confirmation.";
+        name.parentNode.append(note);
+      }
+      cell(row,job.location||"Not stated");
+      cell(row,dateLabel(job.date));
+      if(isApplied){
+        cell(row,job.status==="Applied"?"Applied by you":job.provider||"Confirmed submission");
+        cell(row,job.external_reference||"—");
+      }
+      const vacancy=cell(row);
+      if(/^https:\/\//.test(job.url||"")){
+        const link=document.createElement("a");
+        link.href=job.url;
+        link.target="_blank";
+        link.rel="noopener noreferrer";
+        link.textContent="View vacancy";
+        vacancy.append(link);
+      }
+      T.control(cell(row),job.job_id||job.id,T.state(job.status),Boolean(job.was_submitted||job.external_reference));
+      body.append(row);
+    }
+  }
+
+  let refreshVersion=0;
+  async function refresh(){
+    const version=++refreshVersion;
+    appliedStatus.textContent=rejectedStatus.textContent="Loading applications…";
+    const [tracked,confirmed]=await Promise.allSettled([
+      Promise.resolve().then(()=>window.careerfinderTrackedJobs()),
+      Promise.resolve().then(()=>window.careerfinderConfirmedSubmissions())
+    ]);
+    if(version!==refreshVersion)return;
+    const jobs=tracked.value?.jobs||[];
+    const rejectedJobs=jobs.filter(job=>job.status==="Rejected");
+    const rejectedIds=new Set(rejectedJobs.map(job=>job.id));
+    const submittedByJob=new Map();
+    for(const job of jobs){
+      if(job.status==="Applied")submittedByJob.set(job.id,{...job,date:job.marked_at});
+    }
+    for(const job of confirmed.value?.applications||[]){
+      if(job.status==="Submitted"&&!rejectedIds.has(job.job_id)){
+        submittedByJob.set(job.job_id,{...job,date:job.submitted_at});
+      }
+    }
+    const applications=[...submittedByJob.values()].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||"")));
+    renderRows(applied,applications,true);
+    renderRows(rejected,rejectedJobs.map(job=>({...job,date:job.marked_at})),false);
+    const errors=[];
+    if(tracked.status==="rejected")errors.push("Manually marked applications could not be loaded. "+tracked.reason.message);
+    if(confirmed.status==="rejected")errors.push("Confirmed submissions could not be loaded. "+confirmed.reason.message);
+    appliedStatus.textContent=errors.length?errors.join(" "):applications.length+" applied applications.";
+    rejectedStatus.textContent=tracked.status==="rejected"?"Rejected jobs could not be loaded. "+tracked.reason.message:rejectedJobs.length+" rejected jobs.";
+    byId("saved-applied").textContent=errors.length?"—":applications.length;
+    byId("saved-rejected").textContent=tracked.status==="rejected"?"—":tracked.value.rejected??rejectedJobs.length;
+  }
+
+  byId("submitted-refresh").addEventListener("click",refresh);
+  byId("rejected-refresh").addEventListener("click",refresh);
+  window.careerfinderRefreshTracked=refresh;
+  if(byId("cloud-session-panel")&&!byId("cloud-session-panel").hidden)refresh();
 })();

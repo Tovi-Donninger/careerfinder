@@ -28,7 +28,7 @@ function render(){
     cell(tr,job.location||"Not stated");
     cell(tr,Number.isInteger(job.match_score)?job.match_score+"%":"Not assessed");
     cell(tr,job.verification_status||"Unverified");
-    T.control(cell(tr,""),job.id,st);
+    T.control(cell(tr,""),job.id,st,Boolean(job.queue_external_reference));
     cell(tr,job.discovered_at||"");
     const td=cell(tr,"");const a=document.createElement("a");a.href=job.url;a.target="_blank";a.rel="noopener noreferrer";a.textContent="View vacancy";td.appendChild(a);
     tbody.appendChild(tr);
@@ -36,7 +36,7 @@ function render(){
   const count=s=>allJobs.filter(j=>T.state(j.queue_status,j.queue_provider)===s).length;
   setTile("saved-open",count("open"));
   const flaggedAll=allJobs.filter(attention).length;
-  status.textContent=(flaggedAll?flaggedAll+" need your attention · ":"")+"Showing "+jobs.length+" of "+allJobs.length+" saved job discoveries"+(chosen==="open"?" (jobs you marked Applied or Rejected are moved to their own lists below)":"")+" · "+count("submitted")+" submitted by AI with confirmation.";
+  status.textContent=(flaggedAll?flaggedAll+" need your attention · ":"")+"Showing "+jobs.length+" of "+allJobs.length+" saved job discoveries"+(chosen==="open"?" (jobs you marked Applied or Rejected are moved to their own lists below)":"")+" · "+count("submitted")+" submitted with confirmation.";
 }
 async function refresh(){
   status.textContent="Loading saved recruitment findings…";
