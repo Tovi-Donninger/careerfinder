@@ -58,6 +58,7 @@
   window.careerfinderApplicationQueue=()=>{requireLogin();return call("/api/private/recruitment/application-queue")};
   window.careerfinderConfirmedSubmissions=()=>{requireLogin();return call("/api/private/recruitment/submitted-applications")};
   window.careerfinderRecruitmentJobs=()=>{requireLogin();return call("/api/private/recruitment/jobs")};
+  window.careerfinderSetJobStatus=(jobId,status,note)=>{requireLogin();return call("/api/private/recruitment/job-status","POST",{jobId,status,note})};
   window.careerfinderSaveJobs=jobs=>{requireLogin();return call("/api/private/recruitment/jobs","POST",{jobs})};
   window.careerfinderMatchedSearch=()=>{requireLogin();return call("/api/private/matched-search","POST",{})};
   function refresh(){
