@@ -70,6 +70,19 @@ export function pageHasNoExperienceDemand(pageText) {
 // Always combined with exceedsOneYear, so "junior, 3 years of experience" is still rejected.
 export const NON_HR_OPEN_EXPERIENCE=/\bexperience\b[^.;\n]{0,160}?\bnot (?:required|mandatory|necessary|a must)\b|\bentry[- ]level\b|\bmin(?:imum|\.)?\s*experience\s*:?\s*(?:entry[- ]level|none|0)\b|\bjunior\b/i;
 
+// Admin/ops and sales only (Tovi, 2026-11-19): "previous/proven/relevant/prior experience"
+// with no number of years counts as a fit. Anything stating more than 1 year still fails
+// (exceedsOneYear is always checked first). HR stays strict.
+export const UNQUANTIFIED_EXPERIENCE_CATEGORIES=["admin_ops","sales"];
+export const UNQUANTIFIED_EXPERIENCE=/\b(?:previous|proven|relevant|prior)\s+(?:[a-z][a-z/&-]*\s+){0,3}?experience\b/i;
+export function unquantifiedExperienceOk(text, roleCategory) {
+  const category=normalizeRoleCategory(roleCategory);
+  if(!UNQUANTIFIED_EXPERIENCE_CATEGORIES.includes(category))return false;
+  const t=String(text||"");
+  const sentences=t.split(/(?<=[.!?\n])\s+|\n+/).filter(x=>/experience|years?|yrs?|months?/i.test(x)).join(" . ");
+  return UNQUANTIFIED_EXPERIENCE.test(t)&&!exceedsOneYear(sentences);
+}
+
 // Role-aware gate. job: {zeroExperienceEvidence, zeroExperienceSourceUrl, roleCategory?}
 export function experienceEvidence(job) {
   const category=normalizeRoleCategory(job.roleCategory);
@@ -80,7 +93,7 @@ export function experienceEvidence(job) {
   if(!evidence||!/^https:\/\//i.test(url))return false;
   if(NO_STATED_EXPERIENCE.test(evidence))return noStatedExperienceEvidence(evidence);
   if(exceedsOneYear(evidence))return false;
-  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence)||NON_HR_OPEN_EXPERIENCE.test(evidence);
+  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence)||NON_HR_OPEN_EXPERIENCE.test(evidence)||unquantifiedExperienceOk(evidence,category);
 }
 
 // The evidence table has no category column, so non-HR categories are stored as a
@@ -109,5 +122,5 @@ export function pageExperienceOk(pageText, roleCategory) {
   if(category===null||category==="hr_recruitment")return EXPLICIT_ZERO.test(text);
   const sentences=text.split(/(?<=[.!?\n])\s+|\n+/).filter(s=>/experience|years?|months?/i.test(s)).join(" . ");
   if(exceedsOneYear(sentences))return false;
-  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences)||NON_HR_OPEN_EXPERIENCE.test(text);
+  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences)||NON_HR_OPEN_EXPERIENCE.test(text)||unquantifiedExperienceOk(text,category);
 }

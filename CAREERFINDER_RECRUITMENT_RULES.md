@@ -5,6 +5,8 @@ Each job carries a `roleCategory`: `hr_recruitment`, `admin_ops`, `sales` (SDR/B
 
 - **HR / recruitment** (`hr_recruitment`, or no `roleCategory` given): **zero previous professional experience** is required, with explicit evidence. Nothing below relaxes this.
 - **Office support / admin / operations, sales and customer success** (`admin_ops`, `sales`, `customer_success`): zero experience is accepted, and so is a requirement of **at most 1 year**. The evidence must state it explicitly (for example "0-1 years", "up to 1 year", "1 year of experience", "1+ years", "at least one year", "6 months"). Reject anything above 1 year: "1-2 years", "2+ years", "minimum two years", more than 12 months, "several years". "1+ years" and "at least one year" are allowed because the mandatory minimum is one year.
+- **Admin/ops and sales only** (Tovi, 2026-11-19): wording such as "previous/proven/relevant/prior experience" that states **no number of years** counts as a fit. Anything stating more than 1 year is still rejected. HR/recruitment stays strict, and customer success is unchanged.
+- HR zero-experience evidence may carry one subject word between "prior/previous" and "experience", e.g. "No prior recruiting experience required".
 - An unknown `roleCategory` value is rejected. Evidence without a clear experience statement is rejected (fail closed).
 - The category is stored as a `[role:<category>] ` prefix on the stored evidence text, so no schema change is needed. HR evidence is stored unprefixed.
 
