@@ -8,4 +8,5 @@ const receipt=JSON.parse(await readFile(path,"utf8"));
 const body={jobId,id:receipt.id,jobUrl:receipt.jobUrl,status:receipt.status,reason:receipt.reason||"",confirmation:receipt.confirmation||"",confirmationPage:receipt.confirmationPage||""};
 const response=await fetch("https://careerfinder-search.tovidonninger.workers.dev/api/private/recruitment/application-executor/receipt",{method:"POST",headers:{...(key?{"X-CareerFinder-Automation-Key":key}:{"Authorization":"Bearer "+token}),"Content-Type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
 if(!response.ok)throw Error("Receipt upload failed (HTTP "+response.status+"); verify Worker deployment and queue enrollment");
-console.log("Browser outcome recorded for review; a submitted receipt is not yet independently verified.");
+const data=await response.json().catch(()=>({}));
+console.log(data.submitted?"Employer-confirmed submission recorded under Confirmed submissions.":"Browser outcome recorded; held items appear on the dashboard as NEEDS TOVI.");

@@ -76,8 +76,10 @@ test("browser receipts mark the queue item for Tovi",async()=>{
   assert.equal((await rc("Needs review",{reason:"Required questions need review: salary"})).status,202);
   assert.equal(queueRows(env)[0].reason,"NEEDS TOVI: Application held by the browser run: Required questions need review: salary");
   assert.equal((await rc("Submitted",{confirmation:"Thank you for applying",confirmationPage:"https://careers.example.com/thanks"})).status,202);
-  assert.match(queueRows(env)[0].reason,/^NEEDS TOVI: Browser run reports the application was submitted\. Employer confirmation: "Thank you for applying"/);
-  assert.equal(queueRows(env)[0].status,"Needs review");
+  // Employer confirmation on the employer's own site now becomes a Confirmed submission.
+  assert.equal(queueRows(env)[0].status,"Submitted");
+  assert.match(queueRows(env)[0].reason,/^Submitted\. Employer confirmation: "Thank you for applying"/);
+  assert.equal(env.DB.db.prepare("SELECT count(*) AS n FROM recruitment_application_queue WHERE status='Submitted' AND length(trim(external_reference))>0").get().n,1);
 });
 test("discovery key stays scoped: 401 on every other route",async()=>{
   const env=mkEnv();

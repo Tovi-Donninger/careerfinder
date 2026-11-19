@@ -32,6 +32,15 @@ function validProfile(p) {
   const fields = ["firstName","lastName","email","phone","city","country","address","linkedin","headline","education","experience","skills","cv","coverLetter","minimumSalary","locations","roles","notes"];
   return Object.keys(p).every(k => fields.includes(k) && typeof p[k] === "string" && p[k].length <= 30000);
 }
+// Confirmed-submission gate for browser receipts (see application-executor/receipt).
+export const SUBMIT_CONFIRMATION=/(?:thank you for (?:applying|your application)|application (?:has been |was )?(?:successfully )?(?:submitted|received|sent)|we (?:have )?received your application|successfully applied)/i;
+export function confirmationOnEmployerSite(confirmationUrl,jobUrl){
+  let c,j;try{c=new URL(confirmationUrl);j=new URL(jobUrl)}catch{return false}
+  if(c.protocol!=="https:")return false;
+  if(c.hostname===j.hostname)return true;
+  const ats=/(^|\.)(?:comeet\.co|comeet\.com|lever\.co|greenhouse\.io)$/i;
+  return (ats.test(c.hostname)&&ats.test(j.hostname))||(/[?&]gh_jid=/.test(j.search)&&/(^|\.)greenhouse\.io$/i.test(c.hostname));
+}
 const statuses = ["Discovered","Prepared","Submitted","Interview","Rejected","Blocked"];
 // Items Tovi must look at are marked with this prefix (Grok Bot notes, browser holds, blocked handoffs).
 export const ATTENTION_PREFIX = "NEEDS TOVI:";
@@ -323,6 +332,16 @@ export async function personalApi(request, env, url, searchHandler) {
     await env.DB.prepare("INSERT INTO recruitment_application_receipts(id,job_id,queue_id,executor_status,confirmation_text,confirmation_url,employer_job_url) VALUES(?,?,?,?,?,?,?)").bind(body.id,job.id,queue.id,body.status,confirmation,confirmationUrl,body.jobUrl).run();
     await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Browser receipt received',?)").bind(crypto.randomUUID(),queue.id,"Receipt "+body.id+" pending verification").run();
     if(body.status==="Submitted"){
+      // Employer confirmation text plus an HTTPS confirmation page on the employer's (or its
+      // applicant-tracking system's) site: record it as Submitted with an external reference so it
+      // appears under Confirmed submissions. Anything else stays a held receipt for Tovi.
+      if(confirmationOnEmployerSite(confirmationUrl,job.url)&&SUBMIT_CONFIRMATION.test(confirmation)){
+        const reference=("browser-receipt:"+body.id+" "+confirmationUrl).slice(0,1000);
+        await env.DB.prepare("UPDATE recruitment_application_queue SET status='Submitted',provider='browser-runner',external_reference=?,reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='Submitted'").bind(reference,("Submitted. Employer confirmation: \""+confirmation+"\" at "+confirmationUrl).slice(0,1500),queue.id).run();
+        await env.DB.prepare("UPDATE recruitment_jobs SET pipeline='Submitted' WHERE id=?").bind(job.id).run().catch(()=>{});
+        await env.DB.prepare("INSERT INTO recruitment_application_events(id,queue_id,event_type,details) VALUES(?,?,'Submitted with employer confirmation',?)").bind(crypto.randomUUID(),queue.id,reference).run();
+        return response({ok:true,receiptId:body.id,submitted:true,externalReference:reference},202);
+      }
       await env.DB.prepare("UPDATE recruitment_application_queue SET reason=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status!='Submitted'").bind((ATTENTION_PREFIX+" Browser run reports the application was submitted. Employer confirmation: \""+confirmation+"\" at "+confirmationUrl+". Check for the employer's acknowledgement.").slice(0,1500),queue.id).run();
     }
     if(body.status==="Needs review"||body.status==="Prepared"){
