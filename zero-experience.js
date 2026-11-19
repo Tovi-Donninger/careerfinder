@@ -47,6 +47,29 @@ function statesAtMostOneYear(text) {
     ||new RegExp("\\b(?:\\d+|"+WORD_RE+")\\s*\\+?\\s*months?\\b","i").test(text);
 }
 
+// Non-HR listings that state no experience requirement at all (Tovi, 2026-11-18).
+// Evidence must start with this marker and then quote the listing's requirements;
+// the quote must contain no experience, track-record or years/months demand.
+export const NO_STATED_EXPERIENCE=/^no experience requirement stated in (?:the )?listing\b/i;
+const EXPERIENCE_DEMAND=/(?:\bexperience\b|track record|\bbackground in\b|\bseasoned\b|\bsenior\b|\b(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*\+?\s*(?:years?|yrs?|months?)\b|\byears? of\b)/i;
+export function noStatedExperienceEvidence(evidence) {
+  const text=String(evidence||"").trim();
+  if(!NO_STATED_EXPERIENCE.test(text))return false;
+  const quote=text.replace(NO_STATED_EXPERIENCE,"").replace(/^[\s.:;,–—-]+/,"");
+  if(quote.length<40)return false; // the requirements quote itself is mandatory
+  return !EXPERIENCE_DEMAND.test(quote)&&!exceedsOneYear(quote);
+}
+// Page check for such listings: the live page must not demand experience anywhere.
+const PAGE_EXPERIENCE_DEMAND=/(?:\b(?:proven|previous|prior|relevant|professional|work|sales|b2b|saas|industry|hands[- ]on|demonstrated|related)\s+(?:\w+\s+)?experience\b|\bexperience (?:in|with|as|of|working)\b|track record|\byears? of\b|\b(?:\d+(?:\.\d+)?|one|two|three|four|five)\s*\+?\s*(?:years?|yrs?)\b)/i;
+export function pageHasNoExperienceDemand(pageText) {
+  const text=String(pageText||"");
+  return !PAGE_EXPERIENCE_DEMAND.test(text)&&!exceedsOneYear(text);
+}
+
+// Non-HR only: wording that says experience is optional or that the role is entry level/junior.
+// Always combined with exceedsOneYear, so "junior, 3 years of experience" is still rejected.
+export const NON_HR_OPEN_EXPERIENCE=/\bexperience\b[^.;\n]{0,160}?\bnot (?:required|mandatory|necessary|a must)\b|\bentry[- ]level\b|\bmin(?:imum|\.)?\s*experience\s*:?\s*(?:entry[- ]level|none|0)\b|\bjunior\b/i;
+
 // Role-aware gate. job: {zeroExperienceEvidence, zeroExperienceSourceUrl, roleCategory?}
 export function experienceEvidence(job) {
   const category=normalizeRoleCategory(job.roleCategory);
@@ -55,8 +78,9 @@ export function experienceEvidence(job) {
   const evidence=String(job.zeroExperienceEvidence||"").trim();
   const url=String(job.zeroExperienceSourceUrl||"").trim();
   if(!evidence||!/^https:\/\//i.test(url))return false;
+  if(NO_STATED_EXPERIENCE.test(evidence))return noStatedExperienceEvidence(evidence);
   if(exceedsOneYear(evidence))return false;
-  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence);
+  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence)||NON_HR_OPEN_EXPERIENCE.test(evidence);
 }
 
 // The evidence table has no category column, so non-HR categories are stored as a
@@ -85,5 +109,5 @@ export function pageExperienceOk(pageText, roleCategory) {
   if(category===null||category==="hr_recruitment")return EXPLICIT_ZERO.test(text);
   const sentences=text.split(/(?<=[.!?\n])\s+|\n+/).filter(s=>/experience|years?|months?/i.test(s)).join(" . ");
   if(exceedsOneYear(sentences))return false;
-  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences);
+  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences)||NON_HR_OPEN_EXPERIENCE.test(text);
 }
