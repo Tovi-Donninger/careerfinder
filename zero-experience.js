@@ -5,7 +5,7 @@
 //  - hr_recruitment (or no roleCategory): zero experience, explicit evidence only.
 //  - admin_ops, sales, customer_success: zero experience OR at most 1 year required.
 export const ROLE_CATEGORIES=["hr_recruitment","admin_ops","sales","customer_success"];
-const EXPLICIT_ZERO=/\b(no (?:prior |previous |professional |relevant |work )?experience (?:is )?(?:required|necessary|needed)|no experience needed|no experience necessary|without (?:any |prior |previous )?experience|no previous work experience|no prior work experience|experience (?:is )?not required|previous experience (?:is )?not required|(?:zero|0) (?:years? of )?experience required)\b/i;
+const EXPLICIT_ZERO=/\b(no (?:(?:prior|previous|professional|relevant|work) (?:[a-z][a-z-]* )?)?experience (?:is )?(?:required|necessary|needed)|no experience needed|no experience necessary|without (?:any |prior |previous )?experience|no previous work experience|no prior work experience|experience (?:is )?not required|previous experience (?:is )?not required|(?:zero|0) (?:years? of )?experience required)\b/i;
 
 export function zeroExperienceEvidence(job) {
   const evidence=String(job.zeroExperienceEvidence||"").trim();
