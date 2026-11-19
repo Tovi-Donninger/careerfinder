@@ -71,10 +71,11 @@ export function pageHasNoExperienceDemand(pageText) {
 export const NON_HR_OPEN_EXPERIENCE=/\bexperience\b[^.;\n]{0,160}?\bnot (?:required|mandatory|necessary|a must)\b|\bentry[- ]level\b|\bmin(?:imum|\.)?\s*experience\s*:?\s*(?:entry[- ]level|none|0)\b|\bjunior\b/i;
 
 // Admin/ops and sales only (Tovi, 2026-11-19): "previous/proven/relevant/prior experience"
+// (or a plain role-subject phrase like "B2C phone sales experience", "proven track record")
 // with no number of years counts as a fit. Anything stating more than 1 year still fails
 // (exceedsOneYear is always checked first). HR stays strict.
 export const UNQUANTIFIED_EXPERIENCE_CATEGORIES=["admin_ops","sales"];
-export const UNQUANTIFIED_EXPERIENCE=/\b(?:previous|proven|relevant|prior)\s+(?:[a-z][a-z/&-]*\s+){0,3}?experience\b/i;
+export const UNQUANTIFIED_EXPERIENCE=/\b(?:(?:previous|proven|relevant|prior|sales|b2b|b2c|phone|telesales|telemarketing|office|administrative|admin|operations|client[- ]facing|customer[- ]facing)\s+(?:[a-z0-9][a-z0-9/&-]*\s+){0,3}?experience\b|proven track record\b)/i;
 export function unquantifiedExperienceOk(text, roleCategory) {
   const category=normalizeRoleCategory(roleCategory);
   if(!UNQUANTIFIED_EXPERIENCE_CATEGORIES.includes(category))return false;

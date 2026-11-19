@@ -20,7 +20,11 @@ const base={pageText:page,title:"Business Development Representative",company:"J
 test("runner page check: JFrog-style listing passes",()=>assert.deepEqual(inspectVacancy(base),{verified:true,failures:[]}));
 test("runner page check: page that demands experience is stopped",()=>{
   assert.equal(inspectVacancy({...base,pageText:page+" Requirements: 2+ years of sales experience."}).verified,false);
-  assert.equal(inspectVacancy({...base,pageText:page+" Proven B2B sales experience."}).verified,false);
+  assert.equal(inspectVacancy({...base,pageText:page+" Proven B2B sales experience for 3 years."}).verified,false);
+});
+test("runner page check: unquantified proven experience is a fit for sales (Tovi, 2026-11-19)",()=>{
+  assert.equal(inspectVacancy({...base,pageText:page+" Proven B2B sales experience."}).verified,true);
+  assert.equal(inspectVacancy({...base,sourceEvidence:{...base.sourceEvidence,roleCategory:"customer_success"},pageText:page+" Proven B2B sales experience."}).verified,false);
 });
 test("runner page check: HR evidence still needs explicit zero wording",()=>assert.equal(inspectVacancy({...base,sourceEvidence:{...base.sourceEvidence,roleCategory:"hr_recruitment"}}).verified,false));
 test("language check: optional languages pass, demanded ones block",()=>{

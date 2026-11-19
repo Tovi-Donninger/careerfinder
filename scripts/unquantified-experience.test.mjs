@@ -5,10 +5,10 @@ import { inspectVacancy } from "./vacancy-verification.mjs";
 const url="https://example.com/job";
 const ok=(e,c)=>experienceEvidence({zeroExperienceEvidence:e,zeroExperienceSourceUrl:url,roleCategory:c});
 test("admin_ops and sales accept unquantified previous/proven/relevant experience",()=>{
-  for(const c of ["admin_ops","sales"])for(const e of ["Previous experience as an office manager - advantage","Proven sales experience","Relevant experience in B2B sales","Prior administrative experience required"])assert.equal(ok(e,c),true,c+": "+e);
+  for(const c of ["admin_ops","sales"])for(const e of ["Previous experience as an office manager - advantage","Proven sales experience","Relevant experience in B2B sales","Prior administrative experience required","B2C phone sales experience","Proven track record of hitting and exceeding sales targets","Previous experience in office management, client service or a similar role"])assert.equal(ok(e,c),true,c+": "+e);
 });
 test("anything stating more than 1 year still fails",()=>{
-  for(const c of ["admin_ops","sales"])for(const e of ["Proven sales experience of 2+ years","Previous experience (3 years) as an office manager","Relevant experience: at least two years","Proven experience, several years in B2B sales"])assert.equal(ok(e,c),false,c+": "+e);
+  for(const c of ["admin_ops","sales"])for(const e of ["Proven sales experience of 2+ years","Previous experience (3 years) as an office manager","Relevant experience: at least two years","Proven experience, several years in B2B sales","B2C phone sales experience (2+ years)","Proven track record over 3 years"])assert.equal(ok(e,c),false,c+": "+e);
 });
 test("HR and customer success are unchanged",()=>{
   assert.equal(ok("Previous recruiting experience","hr_recruitment"),false);
