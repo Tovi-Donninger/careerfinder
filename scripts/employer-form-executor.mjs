@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { inspectVacancy } from "./vacancy-verification.mjs";
 import { digitsOnlyPhone, phoneFieldNeedsDigits, pickSubmitButton, classifyIdentityField, APPLY_OPENER_LABEL } from "./form-helpers.mjs";
-import { detectAdapter, leverUrls, isComeetApplyFrame, toE164, CONFIRMATION, confirmationHostOk } from "./form-adapters.mjs";
+import { detectAdapter, leverUrls, isComeetApplyFrame, toE164, CONFIRMATION, confirmationHostOk, visibleFormError } from "./form-adapters.mjs";
 import { buildAnswerBook, answerQuestion } from "./screening-answers.mjs";
 
 const args=process.argv.slice(2);
@@ -243,32 +243,60 @@ try{
   const b=root.locator('[data-qa="btn-submit"], #btn-submit').first();
   if(await visible(b)&&pickSubmitButton([{index:0,visible:true,label:(await b.innerText()).trim()}]))button=b;
  }else{
-  const form=root.locator('form:has(input[type="file"]), form:has(input[type="email"])').first();
-  if(!(await form.count()))throw Error("Application form not found on the employer page");
-  const candidates=form.locator('button, input[type="submit"]');
-  const found=[];
-  for(let i=0;i<await candidates.count();i++){const el=candidates.nth(i);found.push({index:i,visible:await el.isVisible(),label:(await el.evaluate(n=>n.tagName==="INPUT"?n.value:(n.innerText||n.getAttribute("aria-label")||""))).trim()})}
-  const chosen=pickSubmitButton(found);
-  if(chosen)button=candidates.nth(chosen.index);
+  const labelOf=async el=>(await el.evaluate(n=>n.tagName==="INPUT"?n.value:(n.innerText||n.getAttribute("aria-label")||""))).trim();
+  const scan=async scope=>{
+   const candidates=scope.locator('button, input[type="submit"]');
+   const found=[];
+   for(let i=0;i<await candidates.count();i++){const el=candidates.nth(i);found.push({index:i,visible:await el.isVisible(),label:await labelOf(el)})}
+   const chosen=pickSubmitButton(found);
+   return chosen?candidates.nth(chosen.index):null;
+  };
+  const form=root.locator('form:has(input[type="file"]), form:has(input[type="email"]), form:has('+IDENTITY_INPUTS+')').first();
+  if(await form.count())button=await scan(form);
+  // Some sites (BambooHR) put the Submit button outside the <form>. Fall back to a single visible
+  // "Submit"/"Send application" button on the page; a bare "Apply" opener never counts here.
+  if(!button){
+   const all=root.locator('button, input[type="submit"]');
+   const found=[];
+   for(let i=0;i<await all.count();i++){const el=all.nth(i);const label=await labelOf(el);if(/submit|send/i.test(label))found.push({index:i,visible:await el.isVisible(),label})}
+   const chosen=pickSubmitButton(found);
+   if(chosen)button=all.nth(chosen.index);
+  }
  }
  if(!button)throw Error("Unambiguous submission button not found in the application form");
  if(!args.includes("--confirm-authorized"))throw Error("Submission requires --submit --confirm-authorized (explicit permission for this employer application)");
  receipt.reason="Submission button clicked; awaiting employer confirmation. Do not retry automatically.";
  await button.click({timeout:12000});
  // Wait for the employer's confirmation in the page or the form frame (SPA forms do not navigate).
- let match=null,where=page.url();
- for(let i=0;i<40&&!match;i++){
+ // Tovi's rule (t86u): record as submitted when Submit was clicked and the form shows no validation/error
+ // (a thank-you text, a page change or the form disappearing are positive signs). A visible error holds it.
+ const urlBefore=page.url();
+ let match=null,where=page.url(),formError="",formGone=false;
+ const formSel='form:has(input[type="file"]), form:has(input[type="email"])';
+ for(let i=0;i<40&&!match&&!formError&&!formGone;i++){
   await page.waitForTimeout(750);
+  const texts=[];
   for(const f of [page.mainFrame(),...(root!==page?[root]:[])]){
    const t=await f.locator("body").innerText({timeout:3000}).catch(()=>"");
    const m=t.slice(0,25000).match(CONFIRMATION);
    if(m){match=m;where=page.url();break}
+   const errs=await f.locator('[aria-invalid="true"],[role="alert"],.error,.errors,.field-error,.form-error,.validation-error,.invalid-feedback,[class*="error" i]').evaluateAll(nodes=>nodes.filter(n=>n.offsetWidth||n.offsetHeight).map(n=>(n.innerText||"").trim()).filter(Boolean).slice(0,10)).catch(()=>[]);
+   texts.push(...errs);
+   const invalid=await f.locator(formSel+' :invalid').evaluateAll(n=>n.filter(e=>e.offsetWidth||e.offsetHeight).length).catch(()=>0);
+   if(invalid)texts.push("required field not filled");
+   if(i>=3&&!(await f.locator(formSel).first().isVisible().catch(()=>false)))formGone=true;
   }
+  if(!match){const e=visibleFormError(texts)||(texts.includes("required field not filled")?"required field not filled":"");if(e&&i>=2)formError=e}
   if(!match&&i>8&&await challengeVisible())throw Error("Human verification appeared after submitting; check the application manually before retrying");
+  if(!match&&!formError&&page.url()!==urlBefore&&i>=3)formGone=true;
  }
- if(!match)throw Error("Submission clicked but no employer confirmation found; do not retry until checked for duplicates");
- if(!confirmationHostOk(where,url.href))throw Error("Confirmation page is not on the employer or its applicant-tracking site; check manually");
- receipt.submitted=true;receipt.status="Submitted";receipt.reason="Employer confirmation captured on the employer's application page";receipt.confirmation=match[0];receipt.confirmationPage=where;
+ if(formError)throw Error("Submit clicked but the form shows an error ("+formError+"); check the application manually");
+ if(!confirmationHostOk(page.url(),url.href))throw Error("Page after Submit is not on the employer or its applicant-tracking site; check manually");
+ where=page.url();
+ receipt.submitted=true;receipt.status="Submitted";
+ if(match){receipt.reason="Employer confirmation captured on the employer's application page";receipt.confirmation=match[0]}
+ else{receipt.reason="Submit clicked and no form error was shown (recorded as submitted under Tovi's rule)";receipt.confirmation="Application submitted: Submit clicked, no validation error shown"}
+ receipt.confirmationPage=where;
  }
 } catch(error){receipt.reason=error.message; if(receipt.status!=="Prepared")receipt.status="Needs review"}
 finally{

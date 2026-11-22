@@ -42,3 +42,10 @@ export function confirmationHostOk(confirmationUrl,jobUrl){
   const ats=/(^|\.)(?:comeet\.co|comeet\.com|lever\.co|greenhouse\.io)$/i;
   return ats.test(c.hostname)&&ats.test(j.hostname)||(/[?&]gh_jid=/.test(j.search)&&/(^|\.)greenhouse\.io$/i.test(c.hostname));
 }
+// Visible validation/error wording after Submit. Tovi's rule (t86u): Submit clicked with none of this
+// showing (or a thank-you / page change) counts as submitted; any of it holds the job for Tovi.
+export const FORM_ERROR=/(?:this field is required|is required|are required|required field|please (?:fill|enter|select|complete|correct|provide|upload|check)|must be (?:filled|completed|selected|provided)|can'?t be blank|cannot be blank|invalid (?:email|phone|value|format|input)|not a valid|something went wrong|an error (?:has )?occurred|failed to (?:submit|send)|unable to submit|submission failed|try again)/i;
+export function visibleFormError(texts){
+  for(const t of texts||[]){const m=String(t||"").replace(/\s+/g," ").match(FORM_ERROR);if(m)return m[0]}
+  return "";
+}

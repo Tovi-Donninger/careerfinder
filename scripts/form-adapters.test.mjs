@@ -38,3 +38,13 @@ test("confirmation host must belong to the employer or its ATS",()=>{
   assert.equal(confirmationHostOk("https://evil.example/thanks",AK),false);
   assert.equal(confirmationHostOk("http://www.comeet.com/x",AK),false);
 });
+
+import { visibleFormError } from "./form-adapters.mjs";
+test("form error wording is detected, success and neutral text is not",()=>{
+  assert.ok(visibleFormError(["First name is required"]));
+  assert.ok(visibleFormError(["", "Please enter a valid email"]));
+  assert.ok(visibleFormError(["Something went wrong. Please try again."]));
+  assert.equal(visibleFormError(["Thank you for applying!","We will be in touch"]),"");
+  assert.equal(visibleFormError([]),"");
+  assert.equal(visibleFormError(undefined),"");
+});
