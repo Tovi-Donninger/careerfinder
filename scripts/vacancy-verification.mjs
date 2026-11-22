@@ -12,9 +12,10 @@ export function inspectVacancy({pageText,title,company,sourceEvidence={}}){
   if(!titleWords.length||titleWords.filter(w=>text.toLowerCase().includes(w)).length<Math.min(2,titleWords.length))failures.push("Vacancy title could not be matched to the employer page");
   const companyWords=words(company);
   if(companyWords.length&&!companyWords.some(w=>text.toLowerCase().includes(w)))failures.push("Employer name could not be matched to the vacancy page");
-  if(roleCategory&&roleCategory!=="hr_recruitment"&&NO_STATED_EXPERIENCE.test(String(sourceEvidence?.zeroExperience||"").trim())){if(!pageHasNoExperienceDemand(text)&&!unquantifiedExperienceOk(text,roleCategory)&&!preferredExperienceOk(text,roleCategory))failures.push("Employer page now states an experience requirement; review against the role-category limit")}
-  else if(roleCategory&&roleCategory!=="hr_recruitment"){if(!pageExperienceOk(text,roleCategory))failures.push("Employer page does not confirm an experience requirement of at most 1 year for this role category")}
-  else if(!/(?:no (?:(?:prior|previous|professional|relevant|work) (?:[a-z][a-z-]* )?)?experience (?:is )?(?:required|necessary|needed)|(?:entry.level|junior).{0,80}(?:no experience|training provided)|(?:experience (?:is )?not required))/i.test(text))failures.push("Employer page does not explicitly confirm no prior experience is required");
+  const experienceCategory=roleCategory||"hr_recruitment";
+  const isHr=!roleCategory||roleCategory==="hr_recruitment";
+  if(NO_STATED_EXPERIENCE.test(String(sourceEvidence?.zeroExperience||"").trim())){if(!pageHasNoExperienceDemand(text)&&!unquantifiedExperienceOk(text,experienceCategory)&&!preferredExperienceOk(text,experienceCategory)&&!pageExperienceOk(text,experienceCategory))failures.push("Employer page now states an experience requirement; review against the role-category limit")}
+  else if(!pageExperienceOk(text,experienceCategory))failures.push(isHr?"Employer page does not confirm that this HR/recruitment role has no hard experience requirement":"Employer page does not confirm an experience requirement of at most 1 year for this role category");
   if(otherLanguageRequired(text))failures.push("Possible additional language requirement");
   if(/(?:must be based in|residents only|only candidates (?:from|in)).{0,50}(?:usa|united states|uk|united kingdom|europe|eu|canada)/i.test(text))failures.push("Possible location restriction");
   if(!sourceEvidence?.language||!/\benglish\b/i.test(sourceEvidence.language)||/not confirmed|unclear|verify/i.test(sourceEvidence.language))failures.push("English-language eligibility has not been independently verified");

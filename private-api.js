@@ -288,9 +288,7 @@ export async function personalApi(request, env, url, searchHandler) {
     if(!job)return response({error:"Save the job as a discovery before recording its application"},404);
     const existing=await env.DB.prepare("SELECT id,status,provider,external_reference FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     if(existing?.status==="Submitted")return response({ok:true,alreadySubmitted:true,status:"Submitted",provider:existing.provider,externalReference:existing.external_reference});
-    // Rejected stays rejected. An Applied mark (including tovi-manual, e.g. while a form
-    // is still being completed) is upgraded to Submitted once employer confirmation is recorded.
-    if(existing?.status==="Rejected")return response({ok:true,alreadyTracked:true,status:"Rejected",provider:existing.provider});
+    if(existing&&MANUAL_STATUSES.includes(existing.status))return response({ok:true,alreadyTracked:true,status:existing.status,provider:existing.provider});
     const reference=(v.provider==="grok-browser"?("grok-browser "+v.url+" "+v.confirmation):("linkedin:"+v.linkedinJobId+" "+v.confirmation)).slice(0,1000);
     const reason=(v.provider==="grok-browser"
       ?("APPLIED via employer site (grok-browser)"+(v.appliedAt?" "+v.appliedAt:"")+". Confirmation: \""+v.confirmation+"\""+(v.cv?". CV: "+v.cv:""))
@@ -315,7 +313,7 @@ export async function personalApi(request, env, url, searchHandler) {
       const title=clean(job.title,250),company=clean(job.company,250);
       if(!title||!company)return response({error:"Each job needs a title and company"},400);
       if(normalizeRoleCategory(job.roleCategory)===false)return response({error:"roleCategory must be one of hr_recruitment, admin_ops, sales, customer_success"},400);
-      if(!experienceEvidence(job))return response({error:"Every job must include explicit experience evidence and its HTTPS source URL: no experience for HR/recruitment roles, at most 1 year for admin_ops, sales and customer_success roles"},400);
+      if(!experienceEvidence(job))return response({error:"Every job must include explicit experience evidence and its HTTPS source URL: no hard experience requirement for HR/recruitment roles (preferred/advantage/nice-to-have, no stated requirement, or explicit zero experience is a fit), at most 1 year for admin_ops, sales and customer_success roles"},400);
       if(job.queueForApplication!==undefined&&typeof job.queueForApplication!=="boolean")return response({error:"queueForApplication must be true or false"},400);
       records.push({queueForApplication:job.queueForApplication===true,zeroEvidence:encodeStoredEvidence(job),zeroSource:clean(job.zeroExperienceSourceUrl,1000),id:crypto.randomUUID(),url:url.toString(),title,company,location:clean(job.location,250),work:clean(job.workArrangement,80),type:clean(job.employmentType,80),salary:clean(job.salary,120),score:Number.isInteger(job.matchScore)&&job.matchScore>=0&&job.matchScore<=100?job.matchScore:null,reason:clean(job.matchReason,2500),language:clean(job.languageEvidence,1500),eligibility:clean(job.eligibilityEvidence,1500),verification:clean(job.verificationStatus,80)||"Unverified",source:clean(job.source,150)});
     }
