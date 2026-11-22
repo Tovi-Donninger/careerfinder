@@ -23,7 +23,20 @@ concurrency:
   group: careerfinder-browser-preparation
   cancel-in-progress: false
 jobs:
+  # No job searching or auto-submissions on Saturday in Israel (GitHub cron runs in UTC, so check the Israel date).
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      skip: ${{ steps.day.outputs.skip }}
+    steps:
+      - id: day
+        run: |
+          dow=$(TZ=Asia/Jerusalem date +%u)
+          if [[ "$dow" == "6" ]]; then echo "skip=true" >> "$GITHUB_OUTPUT"; echo "Saturday in Israel: skipping search and applications."; else echo "skip=false" >> "$GITHUB_OUTPUT"; fi
   prepare:
+    needs: guard
+    if: needs.guard.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:

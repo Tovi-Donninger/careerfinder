@@ -6,7 +6,7 @@ import { readFile, writeFile, mkdir, open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { inspectVacancy } from "./vacancy-verification.mjs";
-import { digitsOnlyPhone, phoneFieldNeedsDigits, pickSubmitButton } from "./form-helpers.mjs";
+import { digitsOnlyPhone, phoneFieldNeedsDigits, pickSubmitButton, classifyIdentityField, APPLY_OPENER_LABEL } from "./form-helpers.mjs";
 import { detectAdapter, leverUrls, isComeetApplyFrame, toE164, CONFIRMATION, confirmationHostOk } from "./form-adapters.mjs";
 import { buildAnswerBook, answerQuestion } from "./screening-answers.mjs";
 
@@ -74,6 +74,8 @@ try{
  await page.goto(lever?lever.posting:url.href,{waitUntil:"domcontentloaded",timeout:45000});
  if(new URL(page.url()).hostname!==url.hostname)throw Error("Redirected to a different domain; verify employer application page before continuing");
  await page.waitForTimeout(adapter==="comeet"?3000:1000);
+ // Single-page job sites (BambooHR, HubSpot forms) render after domcontentloaded: wait until the page has real text.
+ for(let i=0;i<20;i++){const n=await page.locator("body").innerText().then(t=>t.length).catch(()=>0);if(n>600)break;await page.waitForTimeout(750)}
  const text=(await page.locator("body").innerText()).slice(0,25000);
  if(/verify you are human|cloudflare challenge|are you a robot/i.test(text)||await challengeVisible())throw Error("Human verification required");
  if(/no longer accepting applications|position has been filled|job is closed|applications are closed/i.test(text))throw Error("Vacancy is closed");
@@ -92,6 +94,23 @@ try{
   if(frame){root=frame;await frame.locator('#inputFirstName, input[name="firstName"]').first().waitFor({timeout:20000})}
   else if(!(await page.locator('input[name="firstName"]').count()))throw Error("Comeet application form did not load");
  }
+ // Generic/Greenhouse pages often show the job text first and open the form with an Apply button.
+ const IDENTITY_INPUTS='input[autocomplete="given-name"],input[name*="first" i],input[name*="name" i],input[type="email"],input[autocomplete="email"]';
+ const identityVisible=async()=>{const l=root.locator(IDENTITY_INPUTS);for(let i=0;i<await l.count();i++)if(await l.nth(i).isVisible().catch(()=>false))return true;return false};
+ if(adapter!=="comeet"&&adapter!=="lever"&&!(await identityVisible())){
+  const openers=root.locator('a,button,[role="button"]');
+  for(let i=0;i<await openers.count();i++){
+   const el=openers.nth(i);
+   const label=(await el.innerText().catch(()=>"")).trim();
+   if(!APPLY_OPENER_LABEL.test(label)||!(await el.isVisible().catch(()=>false)))continue;
+   await el.click({timeout:10000}).catch(()=>{});
+   await page.waitForTimeout(1500);
+   if(new URL(page.url()).hostname!==url.hostname)throw Error("The Apply button leads to a different site; apply there manually");
+   break;
+  }
+ }
+ // Forms can render late (HubSpot, BambooHR): wait for a visible identity field before filling anything.
+ for(let i=0;i<24&&!(await identityVisible());i++)await page.waitForTimeout(750);
  // CV first: Lever parses the CV and may overwrite fields, so identity is filled afterwards.
  const cvPath=application.cvFile?resolve(application.cvFile):"";
  if(cvPath){
@@ -105,25 +124,47 @@ try{
  await fill(['input[autocomplete="email"]','input[type="email"]','input[name="email"]'],profile.email);
  // Phone: an intl-tel-input widget (Comeet) gets the E.164 number through its own API, which also
  // selects the country; other fields use digits only when they are numeric or reject "+"/spaces.
+ const fillPhone=async loc=>{
+  const e164=toE164(profile.phone,profile.country||"Israel");
+  const iti=e164?await loc.evaluate((el,num)=>{const g=window.intlTelInput||window.intlTelInputGlobals;const i=g&&g.getInstance&&g.getInstance(el);if(!i)return null;i.setNumber(num);for(const t of ["input","change","blur"])el.dispatchEvent(new Event(t,{bubbles:true}));return {valid:i.isValidNumber?i.isValidNumber():!!el.value}},e164).catch(()=>null):null;
+  if(iti){if(!iti.valid)throw Error("Phone number was not accepted by the employer form; check the profile phone");return}
+  const attrs=await loc.evaluate(el=>({type:el.type,pattern:el.getAttribute("pattern")||"",inputMode:el.inputMode||""}));
+  const digits=digitsOnlyPhone(profile.phone);
+  if(phoneFieldNeedsDigits(attrs))await loc.fill(digits);
+  else{
+   try{await loc.fill(String(profile.phone))}catch{await loc.fill(digits)}
+   const ok=await loc.evaluate(el=>!!el.value&&el.checkValidity());
+   if(!ok)await loc.fill(digits);
+  }
+ };
  if(profile.phone){
   for(const selector of ['input[autocomplete="tel"]','input[type="tel"]','input[name="phone"]','input[name*="phone" i]']){
    const loc=root.locator(selector).first();
    if(!(await visible(loc)))continue;
-   const e164=toE164(profile.phone,profile.country||"Israel");
-   const iti=e164?await loc.evaluate((el,num)=>{const g=window.intlTelInput||window.intlTelInputGlobals;const i=g&&g.getInstance&&g.getInstance(el);if(!i)return null;i.setNumber(num);for(const t of ["input","change","blur"])el.dispatchEvent(new Event(t,{bubbles:true}));return {valid:i.isValidNumber?i.isValidNumber():!!el.value}},e164).catch(()=>null):null;
-   if(iti){if(!iti.valid)throw Error("Phone number was not accepted by the employer form; check the profile phone");break}
-   const attrs=await loc.evaluate(el=>({type:el.type,pattern:el.getAttribute("pattern")||"",inputMode:el.inputMode||""}));
-   const digits=digitsOnlyPhone(profile.phone);
-   if(phoneFieldNeedsDigits(attrs))await loc.fill(digits);
-   else{
-    try{await loc.fill(String(profile.phone))}catch{await loc.fill(digits)}
-    const ok=await loc.evaluate(el=>!!el.value&&el.checkValidity());
-    if(!ok)await loc.fill(digits);
-   }
+   await fillPhone(loc);
    break;
   }
  }
  await fill(['input[name*="linkedin" i]','input[id*="linkedin" i]','input[name="urls[LinkedIn]"]'],profile.linkedin);
+ // Sweep: any still-empty visible identity field the fixed selectors missed (e.g. "Full name", prefixed names),
+ // limited to the application form (the one with the CV upload) so demo/newsletter forms are never filled.
+ {
+  const scope=(await root.locator('form:has(input[type="file"])').count())?root.locator('form:has(input[type="file"])').first():root;
+  const inputs=scope.locator('input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"])');
+  const n=await inputs.count();
+  for(let i=0;i<n;i++){
+   const el=inputs.nth(i);
+   if(!(await visible(el))||(await el.inputValue().catch(()=>"x")))continue;
+   const meta=await el.evaluate(e=>({type:e.type,autocomplete:e.autocomplete,name:e.name,id:e.id,placeholder:e.placeholder,label:(e.labels&&e.labels[0]?e.labels[0].innerText:e.getAttribute("aria-label"))||""}));
+   const kind=classifyIdentityField(meta);
+   if(kind==="firstName")await el.fill(profile.firstName);
+   else if(kind==="lastName")await el.fill(profile.lastName);
+   else if(kind==="fullName")await el.fill((profile.firstName+" "+profile.lastName).trim());
+   else if(kind==="email")await el.fill(profile.email);
+   else if(kind==="phone"&&profile.phone)await fillPhone(el);
+   else if(kind==="linkedin"&&profile.linkedin)await el.fill(profile.linkedin);
+  }
+ }
  // Lever "Current location" is an autocomplete: type the city and take the first suggestion.
  if(adapter==="lever"){
   const loc=root.locator('input[name="location"]').first();
@@ -133,13 +174,15 @@ try{
    if(await visible(sug))await sug.click().catch(()=>{});
   }
  }
+ // From here on only the application form counts (the one with the CV upload), never a hidden demo/contact modal.
+ const formScope=(await root.locator('form:has(input[type="file"])').count())?root.locator('form:has(input[type="file"])').first():root;
  // Custom questions: answer only from the saved profile (screening-answers.mjs). Anything
  // else that is required stops the run. Never infer consent, demographics or experience.
- const questions=await root.locator('input:not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"]),select,textarea').evaluateAll(nodes=>{
+ const questions=await formScope.locator('input:not([type="hidden"]):not([type="file"]):not([type="submit"]):not([type="button"]),select,textarea').evaluateAll(nodes=>{
   const out=[],seen=new Set();
   const textOf=n=>(n?.innerText||n?.textContent||"").replace(/\s+/g," ").trim();
   for(const el of nodes){
-   if(el.disabled||!(el.offsetWidth||el.offsetHeight||el.getClientRects().length))continue;
+   if(el.disabled||!(el.offsetWidth||el.offsetHeight||el.getClientRects().length)||getComputedStyle(el).visibility==='hidden')continue;
    const key=(el.type==="radio"||el.type==="checkbox")?(el.name||el.id):(el.name||el.id);
    if(!key||seen.has(key))continue;
    const block=el.closest('.application-question,.field,.form-group,.form-field,fieldset,li,[role="group"],.question');
@@ -174,11 +217,11 @@ try{
  }
  receipt.answeredQuestions=answered.slice(0,20);
  if(unknown.length)throw Error("Required questions need review: "+unknown.slice(0,12).join(" | "));
- const required=await root.locator('input[required],select[required],textarea[required]').evaluateAll(nodes=>nodes.filter(el=>!el.disabled&&!el.value&&!["hidden","submit","checkbox","radio"].includes(el.type)).map(el=>el.name||el.id||"unnamed required field"));
+ const required=await formScope.locator('input[required],select[required],textarea[required]').evaluateAll(nodes=>nodes.filter(el=>!el.disabled&&!el.value&&!["hidden","submit","checkbox","radio"].includes(el.type)&&(el.type==="file"||(getComputedStyle(el).visibility!=="hidden"&&(el.offsetWidth||el.offsetHeight)))).map(el=>el.name||el.id||(el.type+" field "+(el.getAttribute("aria-label")||el.placeholder||"unnamed")).trim()));
  if(required.length)throw Error("Required questions need review: "+required.slice(0,12).join(", "));
  // Group required radio buttons by question; one selected option satisfies the group.
  // Never infer consent, work authorization, sponsorship or demographic answers.
- const unchecked=await root.locator('input[type="checkbox"][required],input[type="radio"][required]').evaluateAll(nodes=>{
+ const unchecked=await formScope.locator('input[type="checkbox"][required],input[type="radio"][required]').evaluateAll(nodes=>{
    const missing=[],radios=new Map();
    for(const el of nodes){
      if(el.disabled)continue;

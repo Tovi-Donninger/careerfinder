@@ -20,3 +20,22 @@ export function pickSubmitButton(buttons) {
   const matches=buttons.filter(b=>b.visible&&SUBMIT_LABEL.test(String(b.label||"")));
   return matches.length===1?matches[0]:null;
 }
+
+// Which candidate identity field is this input? Returns "firstName"|"lastName"|"fullName"|"email"|"phone"|"linkedin"|null.
+// Looks at type, autocomplete, name, id, placeholder and label. Honeypots ("leave this field blank"),
+// company/parent/father/mother/referral names and anything unrecognised return null.
+export function classifyIdentityField({type="",autocomplete="",name="",id="",placeholder="",label=""}={}) {
+  const t=String(type).toLowerCase();
+  const text=[name,id,placeholder,label].map(s=>String(s||"").toLowerCase().replace(/[_\-.]+/g," ").replace(/([a-z])([A-Z])/g,"$1 $2")).join(" | ");
+  if(/leave (?:this|it)[^|]{0,20}blank|do not fill|honeypot|nickname|company|father|mother|maiden|referr|reference|emergency|manager|employer|school|website|portfolio|notes?\b/.test(text))return null;
+  const ac=String(autocomplete).toLowerCase();
+  if(t==="email"||ac==="email"||/\be ?mail\b/.test(text))return "email";
+  if(t==="tel"||ac==="tel"||/\b(?:phone|mobile|cell)\b/.test(text))return "phone";
+  if(/linkedin/.test(text))return "linkedin";
+  if(ac==="given-name"||/\bfirst ?name\b|\bgiven name\b|\bfname\b/.test(text))return "firstName";
+  if(ac==="family-name"||/\blast ?name\b|\bsurname\b|\bfamily name\b|\blname\b/.test(text))return "lastName";
+  if(ac==="name"||/\bfull ?name\b|\byour name\b|^(?:career )?name\b|\|\s*name\s*(?:\*)?\s*(?:\||$)|^name\b/.test(text))return "fullName";
+  return null;
+}
+// Visible label of a control that opens the application form on the job page.
+export const APPLY_OPENER_LABEL=/^\s*(?:apply|apply now|apply here|apply for (?:this|the) (?:job|position|role)|apply to this job|i'?m interested)\s*$/i;
