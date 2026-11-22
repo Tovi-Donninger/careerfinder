@@ -10,10 +10,12 @@ test("admin_ops, sales and customer success accept unquantified previous/proven/
 test("anything stating more than 1 year still fails",()=>{
   for(const c of ["admin_ops","sales","customer_success"])for(const e of ["Proven sales experience of 2+ years","Previous experience (3 years) as an office manager","Relevant experience: at least two years","Proven experience, several years in B2B sales","B2C phone sales experience (2+ years)","Proven track record over 3 years"])assert.equal(ok(e,c),false,c+": "+e);
 });
-test("HR stays strict; unquantified years preferred still fail for HR",()=>{
+test("HR still rejects unquantified required experience, but preferred wording is a fit",()=>{
   assert.equal(ok("Previous recruiting experience","hr_recruitment"),false);
   assert.equal(ok("Previous recruiting experience",undefined),false);
-  assert.equal(ok("Experience is an advantage","hr_recruitment"),false);
+  assert.equal(ok("Must have previous recruiting experience","hr_recruitment"),false);
+  assert.equal(ok("Experience is an advantage","hr_recruitment"),true);
+  assert.equal(ok("2+ years preferred","hr_recruitment"),true);
 });
 test("page check accepts unquantified wording for sales, rejects years",()=>{
   assert.equal(pageExperienceOk("We are hiring an SDR. Requirements: proven sales experience. Excellent English.","sales"),true);

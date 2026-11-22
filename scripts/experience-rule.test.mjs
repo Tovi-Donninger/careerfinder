@@ -63,3 +63,14 @@ test("POST: invalid job (1-2 years / HR 1 year / bad category / no source) retur
   }
   const env=mockEnv();assert.equal((await post(env,[valid,{...valid,url:"https://example.com/jobs/2",zeroExperienceEvidence:"2 years of experience"}])).status,400);assert.equal(env.calls.length,0);
 });
+
+test("POST: HR preferred/advantage wording is accepted; hard HR experience is still rejected",async()=>{
+  const preferred={...valid,roleCategory:"hr_recruitment",zeroExperienceEvidence:"Preferred: 1 year of experience in recruitment"};
+  const env=mockEnv();const res=await post(env,[preferred]);
+  assert.equal(res.status,200);const out=await res.json();assert.equal(out.ok,true);assert.equal(out.received,1);
+  const ev=env.calls.find(c=>/recruitment_zero_experience_evidence/.test(c.sql));
+  assert.equal(ev.args[1],"Preferred: 1 year of experience in recruitment");
+  const bad=mockEnv();
+  assert.equal((await post(bad,[{...valid,roleCategory:"hr_recruitment",zeroExperienceEvidence:"1+ years HR experience required"}])).status,400);
+  assert.equal(bad.calls.length,0);
+});
