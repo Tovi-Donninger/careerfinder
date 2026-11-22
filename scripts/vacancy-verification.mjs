@@ -1,4 +1,4 @@
-import { pageExperienceOk, NO_STATED_EXPERIENCE, pageHasNoExperienceDemand, unquantifiedExperienceOk } from "../zero-experience.js";
+import { pageExperienceOk, NO_STATED_EXPERIENCE, pageHasNoExperienceDemand, unquantifiedExperienceOk, preferredExperienceOk } from "../zero-experience.js";
 // Conservative public job-page checks. No claims of eligibility from a feed alone.
 // Used before form completion; ambiguous requirements always require human review.
 export function inspectVacancy({pageText,title,company,sourceEvidence={}}){
@@ -12,7 +12,7 @@ export function inspectVacancy({pageText,title,company,sourceEvidence={}}){
   if(!titleWords.length||titleWords.filter(w=>text.toLowerCase().includes(w)).length<Math.min(2,titleWords.length))failures.push("Vacancy title could not be matched to the employer page");
   const companyWords=words(company);
   if(companyWords.length&&!companyWords.some(w=>text.toLowerCase().includes(w)))failures.push("Employer name could not be matched to the vacancy page");
-  if(roleCategory&&roleCategory!=="hr_recruitment"&&NO_STATED_EXPERIENCE.test(String(sourceEvidence?.zeroExperience||"").trim())){if(!pageHasNoExperienceDemand(text)&&!unquantifiedExperienceOk(text,roleCategory))failures.push("Employer page now states an experience requirement; review against the role-category limit")}
+  if(roleCategory&&roleCategory!=="hr_recruitment"&&NO_STATED_EXPERIENCE.test(String(sourceEvidence?.zeroExperience||"").trim())){if(!pageHasNoExperienceDemand(text)&&!unquantifiedExperienceOk(text,roleCategory)&&!preferredExperienceOk(text,roleCategory))failures.push("Employer page now states an experience requirement; review against the role-category limit")}
   else if(roleCategory&&roleCategory!=="hr_recruitment"){if(!pageExperienceOk(text,roleCategory))failures.push("Employer page does not confirm an experience requirement of at most 1 year for this role category")}
   else if(!/(?:no (?:(?:prior|previous|professional|relevant|work) (?:[a-z][a-z-]* )?)?experience (?:is )?(?:required|necessary|needed)|(?:entry.level|junior).{0,80}(?:no experience|training provided)|(?:experience (?:is )?not required))/i.test(text))failures.push("Employer page does not explicitly confirm no prior experience is required");
   if(otherLanguageRequired(text))failures.push("Possible additional language requirement");

@@ -4,6 +4,10 @@
 // Rule (see CAREERFINDER_RECRUITMENT_RULES.md):
 //  - hr_recruitment (or no roleCategory): zero experience, explicit evidence only.
 //  - admin_ops, sales, customer_success: zero experience OR at most 1 year required.
+//    Unquantified previous/proven experience, and preferred/advantage/nice-to-have
+//    wording with no hard requirement, are a fit for all three (Tovi, 2026-11-22).
+//    Hard quantified requirements above 1 year are still rejected.
+//  - Customer support maps to customer_success; data entry and back-office map to admin_ops.
 export const ROLE_CATEGORIES=["hr_recruitment","admin_ops","sales","customer_success"];
 const EXPLICIT_ZERO=/\b(no (?:(?:prior|previous|professional|relevant|work) (?:[a-z][a-z-]* )?)?experience (?:is )?(?:required|necessary|needed)|no experience needed|no experience necessary|without (?:any |prior |previous )?experience|no previous work experience|no prior work experience|experience (?:is )?not required|previous experience (?:is )?not required|(?:zero|0) (?:years? of )?experience required)\b/i;
 
@@ -70,18 +74,50 @@ export function pageHasNoExperienceDemand(pageText) {
 // Always combined with exceedsOneYear, so "junior, 3 years of experience" is still rejected.
 export const NON_HR_OPEN_EXPERIENCE=/\bexperience\b[^.;\n]{0,160}?\bnot (?:required|mandatory|necessary|a must)\b|\bentry[- ]level\b|\bmin(?:imum|\.)?\s*experience\s*:?\s*(?:entry[- ]level|none|0)\b|\bjunior\b/i;
 
-// Admin/ops and sales only (Tovi, 2026-11-19): "previous/proven/relevant/prior experience"
-// (or a plain role-subject phrase like "B2C phone sales experience", "proven track record")
-// with no number of years counts as a fit. Anything stating more than 1 year still fails
-// (exceedsOneYear is always checked first). HR stays strict.
-export const UNQUANTIFIED_EXPERIENCE_CATEGORIES=["admin_ops","sales"];
-export const UNQUANTIFIED_EXPERIENCE=/\b(?:(?:previous|proven|relevant|prior|sales|b2b|b2c|phone|telesales|telemarketing|office|administrative|admin|operations|client[- ]facing|customer[- ]facing)\s+(?:[a-z0-9][a-z0-9/&-]*\s+){0,3}?experience\b|proven track record\b)/i;
+// Admin/ops, sales and customer success (Tovi, 2026-11-19; CS added 2026-11-22):
+// "previous/proven/relevant/prior experience" (or a plain role-subject phrase like
+// "B2C phone sales experience", "proven track record", "customer support experience")
+// with no number of years counts as a fit. A hard requirement of more than 1 year
+// still fails. Preferred/optional years are ignored (see stripPreferredExperience).
+// HR stays strict.
+export const UNQUANTIFIED_EXPERIENCE_CATEGORIES=["admin_ops","sales","customer_success"];
+export const UNQUANTIFIED_EXPERIENCE=/\b(?:(?:previous|proven|relevant|prior|sales|b2b|b2c|phone|telesales|telemarketing|office|administrative|admin|operations|client[- ]facing|customer[- ]facing|customer(?:[- ]success|[- ]support)?|support|data[- ]entry|back[- ]office)\s+(?:[a-z0-9][a-z0-9/&-]*\s+){0,3}?experience\b|proven track record\b)/i;
 export function unquantifiedExperienceOk(text, roleCategory) {
   const category=normalizeRoleCategory(roleCategory);
   if(!UNQUANTIFIED_EXPERIENCE_CATEGORIES.includes(category))return false;
   const t=String(text||"");
   const sentences=t.split(/(?<=[.!?\n])\s+|\n+/).filter(x=>/experience|years?|yrs?|months?/i.test(x)).join(" . ");
-  return UNQUANTIFIED_EXPERIENCE.test(t)&&!exceedsOneYear(sentences);
+  return UNQUANTIFIED_EXPERIENCE.test(t)&&!hardExperienceExceedsOneYear(sentences);
+}
+
+// Preferred / advantage / nice-to-have experience, with no hard requirement above 1 year
+// (Tovi, 2026-11-22). Applies to all non-HR target categories. HR stays strict.
+const SOFT_EXPERIENCE_QUAL="(?:(?:an?|a)\s+)?(?:advantage|advantageous|plus|nice[- ]to[- ]have|bonus|preferred|preferably|preferable|desirable|asset|optional|ideal(?:ly)?)";
+export const PREFERRED_EXPERIENCE=new RegExp("\\bexperience\\b[^.;\\n]{0,80}?(?:is |are |would be |will be |considered |[-–—:]\\s*)?(?:"+SOFT_EXPERIENCE_QUAL+")\\b|\\b(?:"+SOFT_EXPERIENCE_QUAL+")\\b[^.;\\n]{0,80}?\\bexperience\\b","i");
+export const PREFERRED_YEARS=new RegExp("\\b(?:\\d+(?:\\.\\d+)?|"+WORD_RE+"|several|multiple|many|few|couple of|numerous)(?:\\s*(?:-|–|—|to)\\s*(?:\\d+(?:\\.\\d+)?|"+WORD_RE+"))?\\s*(?:\\+|plus)?\\s*(?:years?|yrs?|months?)\\b[^.;\\n]{0,60}?(?:"+SOFT_EXPERIENCE_QUAL+")|(?:"+SOFT_EXPERIENCE_QUAL+")\\b[^.;\\n]{0,60}?\\b(?:\\d+(?:\\.\\d+)?|"+WORD_RE+"|several|multiple|many)(?:\\s*(?:-|–|—|to)\\s*(?:\\d+(?:\\.\\d+)?|"+WORD_RE+"))?\\s*(?:\\+|plus)?\\s*(?:years?|yrs?|months?)\\b","i");
+
+// Remove preferred/optional year clauses so "3 years preferred" is not treated as a hard demand.
+export function stripPreferredExperience(text) {
+  let t=String(text||"");
+  const years="(?:\\d+(?:\\.\\d+)?|"+WORD_RE+"|several|multiple|many|few|couple of|numerous)(?:\\s*(?:-|–|—|to)\\s*(?:\\d+(?:\\.\\d+)?|"+WORD_RE+"))?\\s*(?:\\+|plus)?\\s*(?:years?|yrs?|months?)";
+  const ofExp="(?:\\s+of\\s+(?:relevant |related |prior |previous |professional )?(?:experience|exp\\.?))?";
+  const soft=SOFT_EXPERIENCE_QUAL;
+  const leading=new RegExp("(?:,|;|\\.|\\bbut\\b|\\band\\b)?\\s*(?:is |are |would be |will be |considered )?(?:"+soft+")\\s*[:\\-–—]?\\s*(?:of )?(?:about |around |approximately )?"+years+ofExp,"gi");
+  const trailing=new RegExp("\\b"+years+ofExp+"\\s*(?:is |are |would be |will be |considered )?(?:"+soft+")","gi");
+  t=t.replace(leading," ");
+  t=t.replace(trailing," ");
+  return t.replace(/\s+/g," ").trim();
+}
+export function hardExperienceExceedsOneYear(text) {
+  return exceedsOneYear(stripPreferredExperience(text));
+}
+export function preferredExperienceOk(text, roleCategory) {
+  const category=normalizeRoleCategory(roleCategory);
+  if(!category||category==="hr_recruitment")return false;
+  const t=String(text||"");
+  if(!PREFERRED_EXPERIENCE.test(t)&&!PREFERRED_YEARS.test(t))return false;
+  const sentences=t.split(/(?<=[.!?\n])\s+|\n+/).filter(x=>/experience|years?|yrs?|months?/i.test(x)).join(" . ");
+  return !hardExperienceExceedsOneYear(sentences||t);
 }
 
 // Role-aware gate. job: {zeroExperienceEvidence, zeroExperienceSourceUrl, roleCategory?}
@@ -93,8 +129,8 @@ export function experienceEvidence(job) {
   const url=String(job.zeroExperienceSourceUrl||"").trim();
   if(!evidence||!/^https:\/\//i.test(url))return false;
   if(NO_STATED_EXPERIENCE.test(evidence))return noStatedExperienceEvidence(evidence);
-  if(exceedsOneYear(evidence))return false;
-  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence)||NON_HR_OPEN_EXPERIENCE.test(evidence)||unquantifiedExperienceOk(evidence,category);
+  if(hardExperienceExceedsOneYear(evidence))return false;
+  return EXPLICIT_ZERO.test(evidence)||statesAtMostOneYear(evidence)||NON_HR_OPEN_EXPERIENCE.test(evidence)||unquantifiedExperienceOk(evidence,category)||preferredExperienceOk(evidence,category);
 }
 
 // The evidence table has no category column, so non-HR categories are stored as a
@@ -122,6 +158,6 @@ export function pageExperienceOk(pageText, roleCategory) {
   const text=String(pageText||"");
   if(category===null||category==="hr_recruitment")return EXPLICIT_ZERO.test(text);
   const sentences=text.split(/(?<=[.!?\n])\s+|\n+/).filter(s=>/experience|years?|months?/i.test(s)).join(" . ");
-  if(exceedsOneYear(sentences))return false;
-  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences)||NON_HR_OPEN_EXPERIENCE.test(text)||unquantifiedExperienceOk(text,category);
+  if(hardExperienceExceedsOneYear(sentences))return false;
+  return EXPLICIT_ZERO.test(text)||statesAtMostOneYear(sentences)||NON_HR_OPEN_EXPERIENCE.test(text)||unquantifiedExperienceOk(text,category)||preferredExperienceOk(text,category);
 }
