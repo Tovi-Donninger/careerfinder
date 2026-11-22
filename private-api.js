@@ -288,7 +288,9 @@ export async function personalApi(request, env, url, searchHandler) {
     if(!job)return response({error:"Save the job as a discovery before recording its application"},404);
     const existing=await env.DB.prepare("SELECT id,status,provider,external_reference FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     if(existing?.status==="Submitted")return response({ok:true,alreadySubmitted:true,status:"Submitted",provider:existing.provider,externalReference:existing.external_reference});
-    if(existing&&MANUAL_STATUSES.includes(existing.status))return response({ok:true,alreadyTracked:true,status:existing.status,provider:existing.provider});
+    // Rejected stays rejected. An Applied mark (including tovi-manual, e.g. while a form
+    // is still being completed) is upgraded to Submitted once employer confirmation is recorded.
+    if(existing?.status==="Rejected")return response({ok:true,alreadyTracked:true,status:"Rejected",provider:existing.provider});
     const reference=(v.provider==="grok-browser"?("grok-browser "+v.url+" "+v.confirmation):("linkedin:"+v.linkedinJobId+" "+v.confirmation)).slice(0,1000);
     const reason=(v.provider==="grok-browser"
       ?("APPLIED via employer site (grok-browser)"+(v.appliedAt?" "+v.appliedAt:"")+". Confirmation: \""+v.confirmation+"\""+(v.cv?". CV: "+v.cv:""))

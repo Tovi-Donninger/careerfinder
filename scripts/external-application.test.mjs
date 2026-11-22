@@ -109,3 +109,22 @@ test("grok-browser validation: existing HTTPS job only, confirmation required, L
   assert.equal(r.queue_status,"Submitted");assert.equal(r.queue_provider,"grok-browser");
   assert.match(r.queue_external_reference,/^grok-browser /);
 });
+
+test("grok-browser confirmation upgrades a tovi-manual Applied mark to Submitted",async()=>{
+  const {env,call}=await setup();
+  const url="https://job-boards.greenhouse.io/similarweb/jobs/8377855";
+  const job={title:"Customer Success Manager - SMB",company:"Similarweb",url,location:"Tel Aviv, Israel",roleCategory:"customer_success",zeroExperienceEvidence:"Client-facing experience in a customer success role",zeroExperienceSourceUrl:url,matchScore:80,matchReason:"BROWSER APPLY",languageEvidence:"English",eligibilityEvidence:"Israel eligible",verificationStatus:"Confirmed open"};
+  assert.equal((await call("POST","/api/private/recruitment/jobs",{jobs:[job]})).status,200);
+  const jobId=(await env.DB.db.prepare("SELECT id FROM recruitment_jobs WHERE url=?").get(url)).id;
+  env.DB.db.prepare("UPDATE recruitment_application_queue SET status='Applied',provider='tovi-manual',external_reference='' WHERE job_id=?").run(jobId);
+  const res=await call("POST","/api/private/recruitment/external-application",{url,confirmation:"Thank you for applying. Your application has been received. If there is a fit, someone will get back to you.",provider:"grok-browser",appliedAt:"2026-11-22 10:56"});
+  assert.equal(res.status,200);
+  const body=await res.json();
+  assert.equal(body.status,"Submitted");assert.equal(body.provider,"grok-browser");
+  const list=await (await call("GET","/api/private/recruitment/jobs")).json();
+  const saved=list.jobs.find(j=>j.url===url);
+  assert.equal(saved.queue_status,"Submitted");assert.equal(saved.queue_provider,"grok-browser");
+  assert.match(saved.queue_external_reference,/^grok-browser /);
+  const n=env.DB.db.prepare("SELECT count(*) n FROM recruitment_application_queue WHERE job_id=? AND status='Submitted' AND provider='grok-browser' AND length(trim(external_reference))>0").get(jobId).n;
+  assert.equal(n,1);
+});

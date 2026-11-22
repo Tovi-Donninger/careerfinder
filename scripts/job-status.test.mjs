@@ -114,12 +114,24 @@ test("unknown job, bad status and bad JSON are rejected",async()=>{
   assert.equal((await owner("POST","/api/private/recruitment/job-status",{jobId:id,status:"Submitted"})).status,400);
   assert.equal((await owner("POST","/api/private/recruitment/job-status",{jobId:id,status:"Reset"})).status,409);
 });
-test("a LinkedIn confirmation for a job Tovi already marked Applied or Rejected does not overwrite it",async()=>{
+test("a LinkedIn confirmation does not overwrite a Rejected mark",async()=>{
   const LI="https://www.linkedin.com/jobs/view/4491387430";
   const {row,set,dk}=await setup({...ready,url:LI,matchReason:"NEEDS TOVI: LinkedIn-only",verificationStatus:"needs_review"});
   await set("Rejected");
   const res=await (await dk("POST","/api/private/recruitment/external-application",{url:LI,confirmation:"Application submitted"})).json();
   assert.equal(res.alreadyTracked,true);assert.equal(row().status,"Rejected");assert.equal(row().external_reference,"");
+});
+test("a later confirmation upgrades a tovi-manual Applied mark to Submitted",async()=>{
+  const LI="https://www.linkedin.com/jobs/view/4491387430";
+  const {row,set,dk}=await setup({...ready,url:LI,matchReason:"NEEDS TOVI: LinkedIn-only",verificationStatus:"needs_review"});
+  await set("Applied");
+  assert.equal(row().status,"Applied");assert.equal(row().provider,"tovi-manual");
+  const res=await dk("POST","/api/private/recruitment/external-application",{url:LI,confirmation:"Your application was sent",provider:"linkedin-easy-apply",appliedAt:"2026-11-22 10:56"});
+  assert.equal(res.status,200);
+  const body=await res.json();
+  assert.equal(body.status,"Submitted");assert.equal(body.provider,"linkedin-easy-apply");assert.equal(body.alreadyTracked,undefined);
+  const r=row();assert.equal(r.status,"Submitted");assert.equal(r.provider,"linkedin-easy-apply");assert.equal(r.pipeline,"Submitted");
+  assert.match(r.external_reference,/^linkedin:4491387430 Your application was sent/);
 });
 test("tracked-jobs list: only Applied/Rejected, owner session only, leaves the list on Undo",async()=>{
   const {id,set,owner,call,mk,dk}=await setup();
