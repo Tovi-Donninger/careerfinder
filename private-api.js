@@ -46,15 +46,31 @@ const statuses = ["Discovered","Prepared","Submitted","Interview","Rejected","Bl
 // Validation for /api/private/recruitment/external-application (discovery key).
 export function externalApplicationInput(body){
   if(!body||typeof body!=="object")return {error:"Invalid body"};
-  const m=/^https:\/\/(?:www\.)?linkedin\.com\/jobs\/view\/(\d{5,15})\/?$/.exec(typeof body.url==="string"?body.url.trim():"");
-  if(!m)return {error:"url must be https://www.linkedin.com/jobs/view/<id>"};
+  const rawUrl=typeof body.url==="string"?body.url.trim():"";
+  const m=/^https:\/\/(?:www\.)?linkedin\.com\/jobs\/view\/(\d{5,15})\/?$/.exec(rawUrl);
   const confirmation=typeof body.confirmation==="string"?body.confirmation.replace(/\s+/g," ").trim().slice(0,300):"";
-  if(!confirmation)return {error:"confirmation text is required"};
-  const provider=body.provider===undefined?"linkedin-easy-apply":body.provider;
-  if(!["linkedin-easy-apply","manual"].includes(provider))return {error:"provider must be linkedin-easy-apply or manual"};
-  const appliedAt=typeof body.appliedAt==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(body.appliedAt)?body.appliedAt:"";
+  const appliedAt=typeof body.appliedAt==="string"&&/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?$/.test(body.appliedAt)?body.appliedAt.replace("T"," "):"";
   const cv=typeof body.cv==="string"?body.cv.replace(/[\r\n]+/g," ").trim().slice(0,150):"";
-  return {url:"https://www.linkedin.com/jobs/view/"+m[1],linkedinJobId:m[1],confirmation,provider,appliedAt,cv};
+  if(m){
+    if(!confirmation)return {error:"confirmation text is required"};
+    const provider=body.provider===undefined?"linkedin-easy-apply":body.provider;
+    if(!["linkedin-easy-apply","manual"].includes(provider))return {error:"provider must be linkedin-easy-apply or manual"};
+    return {url:"https://www.linkedin.com/jobs/view/"+m[1],linkedinJobId:m[1],confirmation,provider,appliedAt,cv};
+  }
+  // Grok Bot may also record an application it submitted on the employer's own HTTPS page
+  // (or ATS) for an already-saved discovery. LinkedIn job-view URLs stay on the path above.
+  if(body.provider==="grok-browser"){
+    let url;
+    try{
+      url=new URL(rawUrl);
+      if(url.protocol!=="https:")throw Error("https required");
+      url.hash="";
+      for(const key of [...url.searchParams.keys()])if(/^(utm_|fbclid$|gclid$)/i.test(key))url.searchParams.delete(key);
+    }catch{return {error:"url must be an HTTPS employer or ATS vacancy URL"}}
+    if(!confirmation)return {error:"confirmation text is required"};
+    return {url:url.toString(),linkedinJobId:"",confirmation,provider:"grok-browser",appliedAt,cv};
+  }
+  return {error:"url must be https://www.linkedin.com/jobs/view/<id>"};
 }
 // Tovi's own tracking of a reviewed job: "Applied" (he applied himself) or "Rejected" (employer
 // rejected him, or he dismissed it). "Reset" undoes the latest change. Stored in the application
@@ -261,9 +277,9 @@ export async function personalApi(request, env, url, searchHandler) {
     return response({ok:true,jobId:job.id,title:job.title,company:job.company,status:v.status,provider,manual:provider===MANUAL_PROVIDER});
   }
   if (path === "/api/private/recruitment/external-application" && method === "POST") {
-    // Record an application that was already submitted outside CareerFinder (LinkedIn Easy Apply
-    // by Grok Bot, or by Tovi himself) for an EXISTING discovery job. Only LinkedIn job-view URLs
-    // with the platform's confirmation text are accepted; the only change is status -> Submitted.
+    // Record an application that was already submitted outside CareerFinder for an EXISTING
+    // discovery job: LinkedIn Easy Apply (by Grok Bot or Tovi) or an employer/ATS page that
+    // Grok Bot submitted in the box browser (provider grok-browser). Status -> Submitted.
     const raw=await request.text();if(raw.length>4000)return response({error:"Payload too large"},413);
     let body;try{body=JSON.parse(raw)}catch{return response({error:"Invalid JSON"},400)}
     const v=externalApplicationInput(body);
@@ -273,8 +289,10 @@ export async function personalApi(request, env, url, searchHandler) {
     const existing=await env.DB.prepare("SELECT id,status,provider,external_reference FROM recruitment_application_queue WHERE job_id=?").bind(job.id).first();
     if(existing?.status==="Submitted")return response({ok:true,alreadySubmitted:true,status:"Submitted",provider:existing.provider,externalReference:existing.external_reference});
     if(existing&&MANUAL_STATUSES.includes(existing.status))return response({ok:true,alreadyTracked:true,status:existing.status,provider:existing.provider});
-    const reference=("linkedin:"+v.linkedinJobId+" "+v.confirmation).slice(0,1000);
-    const reason=("APPLIED via LinkedIn"+(v.appliedAt?" "+v.appliedAt:"")+" ("+v.provider+"). Confirmation: \""+v.confirmation+"\""+(v.cv?". CV: "+v.cv:"")).slice(0,1500);
+    const reference=(v.provider==="grok-browser"?("grok-browser "+v.url+" "+v.confirmation):("linkedin:"+v.linkedinJobId+" "+v.confirmation)).slice(0,1000);
+    const reason=(v.provider==="grok-browser"
+      ?("APPLIED via employer site (grok-browser)"+(v.appliedAt?" "+v.appliedAt:"")+". Confirmation: \""+v.confirmation+"\""+(v.cv?". CV: "+v.cv:""))
+      :("APPLIED via LinkedIn"+(v.appliedAt?" "+v.appliedAt:"")+" ("+v.provider+"). Confirmation: \""+v.confirmation+"\""+(v.cv?". CV: "+v.cv:""))).slice(0,1500);
     const queueId=existing?.id||crypto.randomUUID();
     await env.DB.prepare("INSERT INTO recruitment_application_queue(id,job_id,status,reason,provider,external_reference) VALUES(?,?,'Submitted',?,?,?) ON CONFLICT(job_id) DO UPDATE SET status='Submitted',reason=excluded.reason,provider=excluded.provider,external_reference=excluded.external_reference,updated_at=CURRENT_TIMESTAMP WHERE recruitment_application_queue.status!='Submitted'").bind(queueId,job.id,reason,v.provider,reference).run();
     await env.DB.prepare("UPDATE recruitment_jobs SET pipeline='Submitted' WHERE id=?").bind(job.id).run();
